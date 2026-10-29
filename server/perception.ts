@@ -25,6 +25,10 @@ const ENROLLMENT_RESULT_MS = 10 * 60_000;
 const RETRY = 'Recommencez seul, face à la caméra, bien éclairé.';
 // Flux de veille simultanés : le miroir et les satellites (un octet d’emplacement par trame).
 const MAX_WAKE_STREAMS = 16;
+export interface SatelliteSight {
+  description: string;
+  capturedAt: number;
+}
 export const ENROLLMENT_MESSAGES = {
   saved: 'Visage mémorisé.',
   cancelled: 'Enregistrement annulé.',
@@ -78,6 +82,61 @@ export interface VisionPort {
 }
 
 export class PerceptionBridge {
+  private satelliteSight = new Map<
+    string,
+    {
+      finish(error?: Error, result?: SatelliteSight): void;
+    }
+  >();
+
+  analyzeSatelliteImages(
+    images: { jpeg: string; capturedAt: number }[],
+    question: string,
+    signal?: AbortSignal,
+  ): Promise<SatelliteSight> {
+    if (this.worker?.readyState !== 1 || this.satelliteSight.size >= 2)
+      return Promise.reject(new Error('Perception indisponible ou occupée.'));
+    const requestId = randomUUID();
+    const message = JSON.stringify({
+      type: 'satellite_vision',
+      requestId,
+      images,
+      question,
+    });
+    if (Buffer.byteLength(message) > 240000)
+      return Promise.reject(new Error('Images trop volumineuses.'));
+    return new Promise((resolve, reject) => {
+      const abort = () => finish(new Error('Analyse annulée.'));
+      const timer = setTimeout(() => finish(new Error('Analyse de la caméra expirée.')), 60000);
+      const finish = (error?: Error, result?: SatelliteSight) => {
+        clearTimeout(timer);
+        signal?.removeEventListener('abort', abort);
+        this.satelliteSight.delete(requestId);
+        if (error) reject(error);
+        else resolve(result!);
+      };
+      this.satelliteSight.set(requestId, { finish });
+      signal?.addEventListener('abort', abort, { once: true });
+      if (signal?.aborted) abort();
+      else this.worker!.send(message);
+    });
+  }
+
+  private receiveSatelliteSight(event: Record<string, unknown>) {
+    const pending = this.satelliteSight.get(String(event.requestId));
+    if (!pending) return;
+    if (event.error) return pending.finish(new Error('Analyse de la caméra indisponible.'));
+    if (
+      event.status === 'ready' &&
+      typeof event.description === 'string' &&
+      Number.isFinite(event.capturedAt)
+    ) {
+      pending.finish(undefined, {
+        description: event.description.slice(0, 4000),
+        capturedAt: Number(event.capturedAt),
+      });
+    } else pending.finish(new Error('Description de la caméra indisponible.'));
+  }
   readonly camera: CameraBridge;
   readonly browserCamera: BrowserCameraRelay;
   private worker: WebSocket | null = null;
@@ -245,6 +304,10 @@ export class PerceptionBridge {
       }
       try {
         const event = JSON.parse(data.toString());
+        if (event.type === 'satellite_vision_result') {
+          this.receiveSatelliteSight(event);
+          return;
+        }
         if (event.type === 'camera_source_status' && event.source === this.cameraSource()) {
           this.browserCameraSupported = event.source === 'browser';
           this.diagnostic = null;
@@ -329,6 +392,8 @@ export class PerceptionBridge {
     socket.on('close', () => {
       if (this.worker !== socket) return;
       this.browserCamera.close(1013);
+      for (const pending of this.satelliteSight.values())
+        pending.finish(new Error('Perception déconnectée.'));
       this.worker = null;
       this.cameraApplied = null;
       this.wakeReady = false;
@@ -729,6 +794,8 @@ export class PerceptionBridge {
     if (this.worker.bufferedAmount < 16_384) this.worker.send(pcm);
   }
   dispose() {
+    for (const pending of this.satelliteSight.values())
+      pending.finish(new Error('Arrêt du serveur.'));
     this.browserCamera.close();
     this.camera.disconnect();
     this.worker?.close(1001, 'Arrêt du serveur');

@@ -479,6 +479,11 @@ export class VisionBridge {
   /** Déclencheurs périodiques : appelé par la boucle du serveur, jamais par la perception. */
   tick() {
     const session = this.controller.sessionState();
+    // A satellite sees its own room. Never capture the mirror for that conversation.
+    if (session.satellite) {
+      if (this.pending.size) this.dropPending('Conversation sur un satellite.');
+      return;
+    }
     const presence = this.controller.presenceScope();
     const scope = this.controller.scope();
     this.syncInteraction(scope);

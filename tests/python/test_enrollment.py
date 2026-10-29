@@ -64,8 +64,19 @@ class EnrollmentTests(unittest.TestCase):
             for _ in range(6):
                 self.capture(pose)
         for _ in range(6):
-            self.capture(.3, pitch=.45)
+            self.capture(.4, pitch=.45)
         self.assertEqual(self.enrollment.stage, 3)
+
+    def test_vertical_pose_accepts_slight_horizontal_offset(self):
+        for pose in (0, .25, -.25):
+            for _ in range(6):
+                self.capture(pose)
+        for _ in range(6):
+            self.capture(.28, pitch=.45)
+        self.assertEqual(self.enrollment.stage, 4)
+        for _ in range(6):
+            result = self.capture(-.28, pitch=.66)
+        self.assertEqual(len(result), 10)
 
     def test_samples_are_spaced_in_time(self):
         self.enrollment.add([FaceSample(self.feature, 0)], 0)
@@ -87,6 +98,44 @@ class EnrollmentTests(unittest.TestCase):
         self.assertEqual(len(self.enrollment.samples), 0)
         self.assertEqual(len(self.enrollment.templates), 2)
         self.assertIn("différent", self.enrollment.message)
+
+    def test_lost_face_at_vertical_step_can_resume_without_losing_completed_views(self):
+        for pose in (0, .25, -.25):
+            for _ in range(6):
+                self.capture(pose)
+        self.capture(0, pitch=.45)
+        self.enrollment.add([], self.now)
+        self.assertIn("Visage non détecté", self.enrollment.message)
+        self.assertEqual(self.enrollment.stage, 3)
+        self.assertEqual(len(self.enrollment.templates), 6)
+        self.assertEqual(len(self.enrollment.samples), 0)
+        for _ in range(6):
+            self.capture(0, pitch=.45)
+        self.assertEqual(self.enrollment.stage, 4)
+
+    def test_multiple_faces_still_block_enrollment(self):
+        self.capture(0)
+        sample = FaceSample(self.feature, 0)
+        self.assertIsNone(self.enrollment.add([sample, sample], self.now))
+        self.assertEqual(self.enrollment.message, "Placez une seule personne devant la caméra.")
+        self.assertEqual(len(self.enrollment.samples), 0)
+        self.assertEqual(self.enrollment.stage, 0)
+
+    def test_vertical_pose_tolerates_brief_jitter_but_not_a_long_pause(self):
+        for pose in (0, .25, -.25):
+            for _ in range(6):
+                self.capture(pose)
+        for _ in range(5):
+            self.capture(0, pitch=.45)
+            self.capture(0, pitch=.55)
+        self.assertEqual(len(self.enrollment.samples), 5)
+        self.assertIn("Inclinez encore un peu", self.enrollment.message)
+        self.now += 1
+        self.capture(0, pitch=.55)
+        self.assertEqual(len(self.enrollment.samples), 0)
+        for _ in range(6):
+            self.capture(0, pitch=.45)
+        self.assertEqual(self.enrollment.stage, 4)
 
     def test_completing_a_face_rejects_someone_else(self):
         other = np.zeros(128, dtype=np.float32); other[0] = 1

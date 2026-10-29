@@ -10,6 +10,7 @@ import {
 } from './satellites-store.js';
 import type { SatelliteHub } from './satellites.js';
 import type { SatellitePairing } from './satellites-pairing.js';
+import type { LightingCatalog } from '../shared/home-assistant.js';
 
 const name = { type: 'string', minLength: 1, maxLength: SATELLITE_NAME_MAX, pattern: '\\S' };
 const createSchema = compile<{ name: string }>({
@@ -30,6 +31,26 @@ const updateSchema = compile<SatelliteChanges>({
     ledBrightness: { type: 'integer', minimum: 0, maximum: 10 },
     nightLight: { type: 'boolean' },
     attentive: { type: 'boolean' },
+    lighting: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['areaId', 'defaultEntityIds', 'allEntityIds'],
+      properties: {
+        areaId: { type: ['string', 'null'], minLength: 1, maxLength: 255 },
+        defaultEntityIds: {
+          type: 'array',
+          maxItems: 50,
+          uniqueItems: true,
+          items: { type: 'string', pattern: '^(light|switch)\\.[a-z0-9_]+$', maxLength: 255 },
+        },
+        allEntityIds: {
+          type: 'array',
+          maxItems: 100,
+          uniqueItems: true,
+          items: { type: 'string', pattern: '^(light|switch)\\.[a-z0-9_]+$', maxLength: 255 },
+        },
+      },
+    },
   },
 });
 
@@ -46,11 +67,19 @@ export function registerSatellites(
     hub: SatelliteHub;
     pairing: SatellitePairing;
     profiles: ProfileRepository;
+    checkCamera?(id: string): Promise<unknown>;
+    lightingCatalog?(): Promise<LightingCatalog>;
+    lightingChanged?(): void;
     requireAdmin(request: FastifyRequest, reply: FastifyReply): Promise<void>;
   },
 ) {
   const { store, hub, pairing, profiles, requireAdmin } = services;
   const view = (satellite: Satellite) => ({ ...satellite, ...hub.status(satellite.id) });
+  app.get(
+    '/api/admin/satellites/lighting-catalog',
+    { preHandler: requireAdmin },
+    async () => services.lightingCatalog?.() ?? { areasAvailable: false, areas: [], lights: [] },
+  );
 
   app.get(
     '/satellite',
@@ -79,6 +108,33 @@ export function registerSatellites(
     satellites: store.list().map(view),
     pending: pairing.list(),
   }));
+  app.post<{ Params: { id: string } }>(
+    '/api/admin/satellites/:id/camera/preview',
+    { preHandler: requireAdmin, config: { rateLimit: { max: 6, timeWindow: '1 minute' } } },
+    async (request, reply) => {
+      try {
+        const image = await hub.capture(request.params.id);
+        return reply.header('Cache-Control', 'no-store').send(image);
+      } catch {
+        return reply.code(503).send({ error: 'Caméra indisponible.' });
+      }
+    },
+  );
+  app.post<{ Params: { id: string } }>(
+    '/api/admin/satellites/:id/camera/check',
+    { preHandler: requireAdmin, config: { rateLimit: { max: 3, timeWindow: '1 minute' } } },
+    async (request, reply) => {
+      if (!store.get(request.params.id))
+        return reply.code(404).send({ error: 'Satellite introuvable.' });
+      if (!services.checkCamera || !hub.cameraAvailable(request.params.id))
+        return reply.code(409).send({ error: 'Caméra indisponible.' });
+      try {
+        return await services.checkCamera(request.params.id);
+      } catch {
+        return reply.code(503).send({ error: 'Capture ou reconnaissance indisponible.' });
+      }
+    },
+  );
   app.post<{ Params: { device: string } }>(
     '/api/admin/satellites/pending/:device/accept',
     { preHandler: requireAdmin },
@@ -123,12 +179,35 @@ export function registerSatellites(
       if (!updateSchema(body)) return reply.code(400).send({ error: 'Réglages invalides.' });
       if (body.profileId && !profiles.get(body.profileId))
         return reply.code(400).send({ error: 'Profil introuvable.' });
+      if (body.lighting) {
+        const catalog = await services.lightingCatalog?.();
+        const allowed = new Set(catalog?.lights.filter((e) => e.authorized).map((e) => e.id));
+        if (
+          [...body.lighting.defaultEntityIds, ...body.lighting.allEntityIds].some(
+            (id) => !allowed.has(id),
+          )
+        )
+          return reply
+            .code(400)
+            .send({
+              error:
+                'Choisissez uniquement des lampes ou interrupteurs autorisés dans Home Assistant.',
+            });
+        if (body.lighting.areaId && !catalog?.areas.some((a) => a.id === body.lighting!.areaId))
+          return reply
+            .code(400)
+            .send({
+              error:
+                'Pièce Home Assistant indisponible : actualisez la liste ou utilisez un groupe manuel.',
+            });
+      }
       const satellite = store.update(request.params.id, {
         ...body,
         ...(body.name === undefined ? {} : { name: body.name.trim() }),
       });
       if (!satellite) return reply.code(404).send({ error: 'Satellite introuvable.' });
       hub.refresh(satellite);
+      if (body.lighting) services.lightingChanged?.();
       return { satellite: view(satellite) };
     },
   );

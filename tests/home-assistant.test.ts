@@ -34,6 +34,28 @@ const command = (
   action = 'turn_on',
   brightnessPct: number | null = null,
 ) => ({ entityId, action, brightnessPct });
+
+test('pièces : affectation entité prioritaire sur appareil et repli manuel sans autorisation élargie', async (t) => {
+  const f = await fixture(t);
+  f.select();
+  f.fake.areas.push({ area_id: 'office', name: 'Bureau' }, { area_id: 'living', name: 'Salon' });
+  f.fake.devices.push({ id: 'device', area_id: 'office' });
+  f.fake.registry.push(
+    { entity_id: 'light.salon', area_id: 'living', device_id: 'device' },
+    { entity_id: 'switch.bureau', area_id: null, device_id: 'device' },
+  );
+  const catalog = await f.home.lightingCatalog();
+  assert.equal(catalog.areasAvailable, true);
+  assert.equal(catalog.lights.find((e) => e.id === 'light.salon')?.areaId, 'living');
+  assert.equal(catalog.lights.find((e) => e.id === 'switch.bureau')?.areaId, 'office');
+  assert.equal(catalog.lights.find((e) => e.id === 'light.cachee')?.authorized, false);
+  assert.equal(f.fake.calls.length, 0);
+  f.fake.options.areaRegistryDenied = true;
+  const fallback = await f.home.lightingCatalog();
+  assert.equal(fallback.areasAvailable, false);
+  assert.deepEqual(fallback.areas, []);
+  assert.equal(fallback.lights.find((e) => e.id === 'switch.bureau')?.authorized, true);
+});
 const signal = () => new AbortController().signal;
 async function until(predicate: () => boolean) {
   for (let i = 0; i < 100; i++) {

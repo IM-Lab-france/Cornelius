@@ -171,8 +171,20 @@ Les identifiants exacts des sources et des commandes autorisées sont dans la de
   const custom = personalityInstructions(personality) + personalContextInstructions(personality);
   config.instructions += custom;
   if (config.delegation?.type === 'responses') config.delegation.responses.instructions += custom;
+  if (extraTools.some((tool) => tool.name === 'home_assistant__room_lights')) {
+    const roomRules =
+      '\nÉclairage par pièce : pour allumer ou éteindre « la lumière », « les lampes », « ici » ou « toutes les lampes » sans appareil précis, utilise home_assistant__room_lights. room=null désigne exclusivement la pièce du satellite actif ; aucune préférence personnelle ne doit substituer une autre pièce. Si une autre pièce est explicitement nommée, transmets son nom dans room. scope=default sauf demande explicite de toutes les lampes. Si le groupe est absent ou indisponible, demande de préciser ; ne choisis pas une lampe d’une autre pièce avec home_assistant__control. Un appareil explicitement nommé peut être commandé avec home_assistant__control. Respecte le résultat confirmed ; ne répète pas automatiquement une commande partielle.';
+    config.instructions += roomRules;
+    if (config.delegation?.type === 'responses')
+      config.delegation.responses.instructions += roomRules;
+  }
   if (features.voiceOnly) {
-    config.instructions += voiceOnlyInstructions;
+    config.instructions += vision
+      ? voiceOnlyInstructions.replace(
+          'Aucune carte, image ou caméra n’est disponible : ne propose jamais d’afficher, de montrer ou de regarder quelque chose.',
+          'Aucun écran ni carte ne sont disponibles. La caméra du satellite est accessible uniquement avec vision__look : utilise cet outil pour regarder et rapporte les faits à voix haute.',
+        )
+      : voiceOnlyInstructions;
     if (config.delegation?.type === 'responses')
       config.delegation.responses.instructions += voiceOnlyDelegation;
   }

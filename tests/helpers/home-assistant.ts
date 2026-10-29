@@ -33,6 +33,8 @@ export async function fakeHomeAssistant() {
   const calls: { path: string; body: Record<string, unknown> }[] = [];
   // Entrées de registre ajoutées par un test (capteurs, grand catalogue).
   const registry: Record<string, unknown>[] = [];
+  const areas: Record<string, unknown>[] = [];
+  const devices: Record<string, unknown>[] = [];
   const wsCalls: string[] = [];
   const options = {
     apply: true,
@@ -42,6 +44,7 @@ export async function fakeHomeAssistant() {
     readStatus: 200,
     assistDenied: false,
     aliasBatchDenied: false,
+    areaRegistryDenied: false,
     malformed: false,
     holdRead: false,
   };
@@ -149,6 +152,21 @@ export async function fakeHomeAssistant() {
         };
       }
       if (request.type === 'homeassistant/expose_new_entities/get') result = { expose_new: true };
+      if (request.type === 'config/area_registry/list') {
+        if (options.areaRegistryDenied) {
+          socket.send(
+            JSON.stringify({
+              id: request.id,
+              type: 'result',
+              success: false,
+              error: { code: 'unauthorized', message: 'Registry denied' },
+            }),
+          );
+          return;
+        }
+        result = areas;
+      }
+      if (request.type === 'config/device_registry/list') result = devices;
       if (request.type === 'config/entity_registry/list')
         result = [
           { entity_id: 'light.salon', options: { conversation: { should_expose: true } } },
@@ -191,6 +209,8 @@ export async function fakeHomeAssistant() {
     states,
     aliases,
     registry,
+    areas,
+    devices,
     calls,
     wsCalls,
     options,

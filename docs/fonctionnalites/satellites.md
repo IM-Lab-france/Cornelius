@@ -6,7 +6,7 @@ Cette page explique comment installer un satellite audio dans une autre pièce, 
 
 Un satellite est un petit boîtier avec un micro, un haut-parleur et un anneau lumineux, posé dans une autre pièce. On lui parle comme au miroir : « Cornelius, quelle heure est-il ? », et Cornelius répond par son haut-parleur.
 
-- La conversation est **en voix seule** : ni carte, ni image, ni caméra.
+- La conversation est **en voix seule** : sans carte ni écran. Avec l’extension caméra locale décrite ci-dessous, une caméra peut fournir des images au serveur.
 - **Une seule conversation à la fois** dans la maison : sur le miroir ou sur un satellite. Un satellite qui entend « Cornelius » pendant ce temps clignote en ambre.
 - Quand le miroir et un satellite entendent le même « Cornelius », l’appareil qui l’a le mieux entendu répond.
 - Pendant la conversation d’un satellite, le miroir reste au repos et affiche « Conversation en cours : » suivi du nom de la pièce.
@@ -16,7 +16,7 @@ Matériel pris en charge : la carte **Waveshare ESP32-S3-AUDIO-Board**, avec le 
 
 ## Avant de commencer
 
-- Le mot d’appel « Cornelius » doit être activé : **Quand il écoute → Ce qui l’ouvre → « Cornelius »** (voir [Le mot d’appel](mot-d-appel.md)).
+- Le modèle du mot d’appel « Cornelius » doit être prêt. Chaque satellite associé écoute ce mot indépendamment du déclenchement choisi pour le miroir : celui-ci peut rester réglé sur le regard ou la présence.
 - L’accès depuis le réseau local doit être activé (il l’est par défaut, voir [Accès depuis le réseau local](../utilisation/reseau-local.md)).
 - Le satellite rejoint un Wi-Fi en **2,4 GHz**, sur le même réseau que l’ordinateur de Cornelius.
 - Le pare-feu de l’ordinateur doit laisser entrer le port `3443` (TCP) et l’annonce du réseau local (mDNS, port `5353` en UDP) pour Node.js.
@@ -87,7 +87,7 @@ Voir aussi [Confidentialité](../reference/confidentialite.md).
 | Anneau bleu qui tourne longtemps | Le Wi-Fi ne répond pas. Après quelques essais, le satellite rouvre son réseau de configuration : vérifiez le mot de passe, et que le réseau est en 2,4 GHz. |
 | Anneau orange | Cornelius est éteint, injoignable, ou l’accès depuis le réseau local est désactivé. Vérifiez que Cornelius tourne, et le pare-feu (port `3443`). Le satellite le recherche de lui-même toutes les 30 secondes. |
 | Il n’apparaît pas dans « Nouveaux satellites » | Le satellite ne trouve pas Cornelius : vérifiez le pare-feu (mDNS, port `5353` en UDP) et que l’ordinateur est sur le même réseau. |
-| « Cornelius » n’ouvre rien | Le mot d’appel doit être activé et prêt (**Quand il écoute**). Si l’ouverture est réservée aux membres du foyer, rattachez le satellite à une personne. |
+| « Cornelius » n’ouvre rien | Le modèle du mot d’appel doit être prêt et le micro du satellite ouvert. Si l’ouverture est réservée aux membres du foyer, rattachez le satellite à une personne. |
 | Cornelius s’interrompt tout seul | L’écoute attentive est active alors que l’écho n’est pas annulé : désactivez-la dans la fiche du satellite. |
 
 Le journal de Cornelius (rubrique **Journal**) note la connexion de chaque satellite, le mot d’appel entendu et, pendant que Cornelius parle, les mesures d’écho envoyées par le satellite (« Journal du satellite »).
@@ -99,3 +99,30 @@ Le journal de Cornelius (rubrique **Journal**) note la connexion de chaque satel
 - [Ouverture et présence](ouverture-et-presence.md)
 - [Accès depuis le réseau local](../utilisation/reseau-local.md)
 - [Confidentialité](../reference/confidentialite.md)
+
+
+## Extension caméra Waveshare (locale)
+
+Le firmware upstream est audio. L’extension de cette installation ajoute une caméra OV2640 sur le connecteur de la Waveshare. Les sources reproductibles sont dans `firmware/waveshare-camera/`.
+
+La caméra sert uniquement à décrire la scène. Elle ne reconnaît aucune personne et ne change jamais le profil de conversation : Bureau conserve son profil Cédric configuré dans **Conversations au nom de**. Aucune photo n’est prise au mot d’appel.
+
+Dites « Cornelius », attendez le signal de disponibilité, puis « Que vois-tu ? », « Que tient la personne devant toi ? » ou une question sur un objet. Une seule nouvelle photo du satellite est analysée localement. La caméra du miroir n’est pas utilisée et aucun nom n’est déduit de l’image.
+
+Dans **Satellites audio**, **Décrire la scène** teste l’analyse sans conversation ; **Voir le cadrage** montre une capture ponctuelle pendant 20 secondes. Les JPEG restent en mémoire, sans enregistrement sur disque ni flux vidéo continu. L’image est analysée localement ; la description rejoint le contexte conversationnel OpenAI si la demande est vocale. BOOT coupe le micro et interdit aussi les captures.
+
+
+## Éclairage propre à chaque satellite
+
+Dans **Satellites audio**, ouvrez **Éclairage de cette pièce** sur la fiche du satellite.
+
+1. Cochez une ou plusieurs **Lampes par défaut** : elles répondent à « allume la lumière » ou « éteins les lampes » sans précision.
+2. Pour **toutes les lampes**, choisissez une **pièce Home Assistant**. À chaque demande explicite de toutes les lampes, Cornelius relit ses registres et utilise uniquement les entités du domaine `light` autorisées dans cette pièce. Une affectation de pièce propre à l’entité prime sur celle de son appareil.
+3. Les lampes exposées comme prises/interrupteurs (`switch`) s’ajoutent dans **Autres lampes pour toutes les lampes**. Ce groupe manuel peut aussi remplacer la pièce HA. Les lampes par défaut sont toujours incluses. N’y ajoutez pas l’alimentation d’une imprimante ou d’un autre appareil.
+4. Cliquez **Enregistrer l’éclairage de…**. Une conversation en cours est refermée pour reprendre avec le nouveau contexte.
+
+Sans pièce précisée, la pièce du satellite actif est utilisée, même si plusieurs satellites partagent le même profil Cédric. Une pièce explicitement nommée reste prioritaire ; « toutes les lampes de la cuisine » peut aussi viser une pièce HA sans satellite. Sans groupe par défaut défini, Cornelius demande de préciser une lampe : il ne doit pas choisir le salon par défaut depuis le bureau.
+
+Seuls les appareils sélectionnés et autorisés dans le module Home Assistant sont proposés et commandés. Choisir une pièce n’élargit pas ces autorisations. Les interrupteurs ne sont jamais traités automatiquement comme des lampes : cochez ceux qui commandent un éclairage. Si les registres de pièces sont indisponibles, les groupes entièrement manuels restent utilisables. Une pièce HA configurée mais devenue indisponible bloque la commande « toutes » au lieu de produire une liste incomplète.
+
+Le serveur résout la liste des entités, supprime les doublons et appelle les commandes individuelles existantes ; aucune commande globale à toute la maison n’est envoyée. Un résultat partiel ou non confirmé est signalé sans réessai automatique. Ce réglage concerne l’allumage/extinction ; pour une commande particulière ou un autre appareil, précisez son nom.

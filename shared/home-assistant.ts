@@ -59,3 +59,15 @@ export interface HomeAssistantCommand {
   action: 'read' | 'turn_on' | 'turn_off';
   brightnessPct: number | null;
 }
+
+export interface LightingCatalog {
+  areasAvailable: boolean;
+  areas: { id: string; name: string }[];
+  lights: {
+    id: string;
+    name: string;
+    domain: string;
+    areaId: string | null;
+    authorized: boolean;
+  }[];
+}

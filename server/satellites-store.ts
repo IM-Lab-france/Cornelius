@@ -1,6 +1,11 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
-import type { SatelliteSettings } from '../shared/satellites.js';
+import type { SatelliteSettings, SatelliteLighting } from '../shared/satellites.js';
+
+export const satelliteLightingMigration = `CREATE TABLE IF NOT EXISTS satellite_lighting (
+  satellite_id TEXT PRIMARY KEY REFERENCES satellites(id) ON DELETE CASCADE,
+  config TEXT NOT NULL CHECK(json_valid(config))
+) STRICT;`;
 
 /**
  * Satellites audio du foyer (rejouable). Le jeton n’est jamais gardé : seulement son empreinte.
@@ -28,6 +33,7 @@ export interface Satellite extends SatelliteSettings {
   name: string;
   /** Profil rattaché (mémoire personnelle) ; null : satellite anonyme, le cas par défaut. */
   profileId: string | null;
+  lighting?: SatelliteLighting;
   createdAt: number;
   lastSeenAt: number | null;
 }
@@ -35,6 +41,7 @@ export interface Satellite extends SatelliteSettings {
 export type SatelliteChanges = Partial<SatelliteSettings> & {
   name?: string;
   profileId?: string | null;
+  lighting?: SatelliteLighting;
 };
 
 const tokenHash = (token: string) => createHash('sha256').update(token).digest('hex');
@@ -63,11 +70,17 @@ export class SatelliteStore {
     return this.db
       .prepare('SELECT * FROM satellites ORDER BY created_at, id')
       .all()
-      .map((row) => satellite(row));
+      .map((row) => this.withLighting(satellite(row)));
   }
   get(id: string): Satellite | null {
     const row = this.db.prepare('SELECT * FROM satellites WHERE id = ?').get(id);
-    return row ? satellite(row) : null;
+    return row ? this.withLighting(satellite(row)) : null;
+  }
+  private withLighting(value: Satellite): Satellite {
+    const row = this.db
+      .prepare('SELECT config FROM satellite_lighting WHERE satellite_id = ?')
+      .get(value.id);
+    return row ? { ...value, lighting: JSON.parse(String(row.config)) } : value;
   }
   /** Le jeton n’est rendu qu’ici : il faut le noter tout de suite dans le satellite. */
   create(name: string): { satellite: Satellite; token: string } {
@@ -104,6 +117,12 @@ export class SatelliteStore {
         next.attentive ? 1 : 0,
         id,
       );
+    if (changes.lighting !== undefined)
+      this.db
+        .prepare(
+          'INSERT INTO satellite_lighting(satellite_id, config) VALUES (?, ?) ON CONFLICT(satellite_id) DO UPDATE SET config=excluded.config',
+        )
+        .run(id, JSON.stringify(changes.lighting));
     return this.get(id);
   }
   remove(id: string): boolean {

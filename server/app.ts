@@ -1,3 +1,5 @@
+import { SatelliteLightingBridge } from './satellite-lighting.js';
+import { SatelliteVision } from './satellite-vision.js';
 import { isCardSettings } from '../shared/cards.js';
 import { isLiveVoice } from '../shared/voices.js';
 import { isOrbScale, ORB_SCALE_MAX, ORB_SCALE_MIN } from '../shared/display.js';
@@ -403,6 +405,7 @@ export async function createApp(
     heartbeat: options.timers !== false,
   });
   live.attachSatelliteOutput((satelliteId, pcm) => satellites.play(satelliteId, pcm));
+  live.attachRoomLighting(new SatelliteLightingBridge(satelliteStore, homeAssistant, controller));
   const devices = () => {
     const local = perception.snapshot();
     return {
@@ -458,6 +461,8 @@ export async function createApp(
   );
   perception.useVision(vision);
   live.attachVision(vision);
+  const satelliteVision = new SatelliteVision(satellites, perception, controller);
+  live.attachSatelliteVision(satelliteVision);
   vision.attachAppender(live);
   // Mode voix : avec la reconnaissance, caméra allumée en permanence pour reconnaître la
   // personne dès « Cornelius » ; avec la seule vision locale, allumée pendant la conversation ;
@@ -690,6 +695,15 @@ export async function createApp(
   registerSatellites(app, {
     store: satelliteStore,
     hub: satellites,
+    lightingCatalog: () => homeAssistant.lightingCatalog(),
+    lightingChanged: () => controller.homeAssistantChanged(),
+    checkCamera: async (id) => {
+      const sight = await satelliteVision.describe(
+        id,
+        'Décris brièvement la scène visible, sans identifier les personnes.',
+      );
+      return { ok: true, detail: sight.description };
+    },
     pairing: satellitePairing,
     profiles,
     requireAdmin,

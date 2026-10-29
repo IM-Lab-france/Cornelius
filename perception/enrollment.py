@@ -26,6 +26,9 @@ STAGES = 5
 # Écart d’inclinaison verticale par rapport à la position de face.
 PITCH_MIN = 0.06
 PITCH_MAX = 0.35
+# Même tolérance horizontale que pour une image utilisable en reconnaissance.
+# Le nez peut se décaler légèrement quand le menton se lève.
+VERTICAL_MAX_YAW = 0.35
 
 
 class Enrollment:
@@ -69,14 +72,17 @@ class Enrollment:
             direction = 1 if sample.pose > 0 else -1
             return 0.18 <= abs(sample.pose) <= 0.42 and (stage == 1 or direction != self.direction)
         offset = sample.pitch - self.baseline
-        if abs(sample.pose) > 0.2 or not PITCH_MIN <= abs(offset) <= PITCH_MAX:
+        if abs(sample.pose) > VERTICAL_MAX_YAW or not PITCH_MIN <= abs(offset) <= PITCH_MAX:
             return False
         return stage == 3 or (offset > 0) != (self.vertical > 0)
 
     def add(self, samples, now):
         if len(samples) != 1:
             self.samples.clear()
-            self.message = "Placez une seule personne devant la caméra."
+            self.message = (
+                "Visage non détecté : revenez légèrement de face, puis inclinez moins la tête."
+                if not samples else "Placez une seule personne devant la caméra."
+            )
             return None
         sample = samples[0]
         if sample.issue:
@@ -94,7 +100,21 @@ class Enrollment:
             return None
         self.message = self.prompt()
         if not self.matches(sample):
-            self.samples.clear()
+            # Un léger tremblement entre deux images valides ne doit pas faire
+            # recommencer la pose verticale. Les pertes de visage, problèmes de
+            # qualité et changements d'identité restent rejetés plus haut.
+            if self.stage < 3 or now - self.last_sample_at > 0.75:
+                self.samples.clear()
+            if self.stage >= 3:
+                offset = sample.pitch - self.baseline
+                if abs(sample.pose) > VERTICAL_MAX_YAW:
+                    self.message = "Gardez le visage face à la caméra, sans tourner à gauche ou à droite."
+                elif abs(offset) < PITCH_MIN:
+                    self.message = self.prompt() + " Inclinez encore un peu, lentement."
+                elif abs(offset) > PITCH_MAX:
+                    self.message = "Angle trop fort : revenez doucement vers la position de face."
+                else:
+                    self.message = self.prompt() + " Partez de face dans le sens opposé à l’étape précédente."
             if self.stage == 0:
                 self.pitches.clear()
             return None

@@ -37,7 +37,7 @@ import { adminPasswordMigration } from './admin-password.js';
 import { secretsMigration } from './secrets.js';
 import { mailMigration, mailRecipientsMigration } from './mail-store.js';
 import { trustedDevicesMigration } from './trusted-devices.js';
-import { satellitesMigration } from './satellites-store.js';
+import { satellitesMigration, satelliteLightingMigration } from './satellites-store.js';
 import {
   screensaverChoicesMigration,
   screensaverDurationMigration,
@@ -401,6 +401,7 @@ export const migrations: readonly string[] = [
   mailMigration,
   // Envoi par e-mail : plusieurs adresses pour un même profil.
   mailRecipientsMigration,
+  satelliteLightingMigration,
 ];
 
 /** The server owns this connection. Backups include WAL changes via SQLite itself. */

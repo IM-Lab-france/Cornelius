@@ -1,3 +1,4 @@
+import { SatelliteLightingSettings } from './SatelliteLightingSettings';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { KeyRound, MicOff, TriangleAlert } from 'lucide-react';
 import type { NetworkStatus, Profile } from '../../../shared/types';
@@ -78,9 +79,11 @@ export function Satellites({
           <CardTitle>Satellites audio</CardTitle>
           <CardDescription>
             Un satellite écoute « Cornelius » dans une autre pièce et y tient la conversation, à
-            voix seule : ni carte, ni caméra. Une seule conversation à la fois dans la maison. Un
-            satellite neuf, relié au Wi-Fi, apparaît tout seul ci-dessous pour être associé ; le
-            formulaire suivant ne sert qu’à un satellite configuré à la main.
+            voix seule, sans écran. Avec une caméra, il peut aussi décrire la scène. Le miroir
+            conserve son propre déclenchement, par le regard ou la présence. Une seule conversation
+            à la fois dans la maison. Un satellite neuf, relié au Wi-Fi, apparaît tout seul
+            ci-dessous pour être associé ; le formulaire suivant ne sert qu’à un satellite configuré
+            à la main.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4 text-sm">
@@ -233,6 +236,14 @@ function SatelliteCard({
   onChanged: () => void;
 }) {
   const [name, setName] = useState(satellite.name);
+  const [cameraResult, setCameraResult] = useState<string | null>(null);
+  const [checkingCamera, setCheckingCamera] = useState(false);
+  const [cameraPreview, setCameraPreview] = useState<string | null>(null);
+  useEffect(() => {
+    if (!cameraPreview) return;
+    const timer = setTimeout(() => setCameraPreview(null), 20000);
+    return () => clearTimeout(timer);
+  }, [cameraPreview]);
   const [profileId, setProfileId] = useState(satellite.profileId ?? '');
   const [confirming, setConfirming] = useState<'token' | 'remove' | null>(null);
   const changed = name.trim() !== satellite.name || profileId !== (satellite.profileId ?? '');
@@ -268,6 +279,69 @@ function SatelliteCard({
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4 text-sm">
+        <SatelliteLightingSettings satellite={satellite} run={run} onChanged={onChanged} />
+        {satellite.camera && (
+          <div className="space-y-2">
+            <p>
+              La caméra décrit la scène à ta demande, sans reconnaître les personnes ni modifier le
+              profil de conversation. Les images ne sont pas enregistrées.
+            </p>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={checkingCamera || satellite.muted}
+              onClick={async () => {
+                setCheckingCamera(true);
+                try {
+                  const result = await api.checkSatelliteCamera(satellite.id);
+                  setCameraResult(result.detail);
+                } catch {
+                  setCameraResult(
+                    'Description indisponible. Vérifie la caméra et le modèle de vision locale.',
+                  );
+                } finally {
+                  setCheckingCamera(false);
+                }
+              }}
+            >
+              {checkingCamera ? 'Analyse en cours…' : 'Décrire la scène'}
+            </Button>
+            {cameraResult && <p role="status">{cameraResult}</p>}
+            <Button
+              type="button"
+              variant="outline"
+              disabled={checkingCamera || satellite.muted}
+              onClick={async () => {
+                setCheckingCamera(true);
+                try {
+                  const image = await api.previewSatelliteCamera(satellite.id);
+                  setCameraPreview('data:image/jpeg;base64,' + image.jpeg);
+                } catch {
+                  setCameraResult('Aperçu caméra indisponible.');
+                } finally {
+                  setCheckingCamera(false);
+                }
+              }}
+            >
+              Voir le cadrage
+            </Button>
+            {cameraPreview && (
+              <div>
+                <img
+                  src={cameraPreview}
+                  alt="Cadrage actuel de la caméra du satellite"
+                  className="max-w-full rounded-md"
+                  width="640"
+                  height="480"
+                />
+                <p>Capture ponctuelle, masquée après 20 secondes.</p>
+                <Button type="button" variant="ghost" onClick={() => setCameraPreview(null)}>
+                  Masquer
+                </Button>
+              </div>
+            )}
+          </div>
+        )}
         <form
           className="grid gap-4 sm:grid-cols-2"
           onSubmit={(event) => {

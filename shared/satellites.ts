@@ -15,12 +15,19 @@ export interface SatelliteSettings {
   attentive: boolean;
 }
 
+export interface SatelliteLighting {
+  areaId: string | null;
+  defaultEntityIds: string[];
+  allEntityIds: string[];
+}
+
 /** Un satellite audio tel que l’administration le voit (jamais son jeton). */
 export interface SatelliteView extends SatelliteSettings {
   id: string;
   name: string;
   /** Profil rattaché (mémoire personnelle) ; null : satellite anonyme, le cas par défaut. */
   profileId: string | null;
+  lighting?: SatelliteLighting;
   createdAt: number;
   lastSeenAt: number | null;
   online: boolean;
@@ -28,6 +35,8 @@ export interface SatelliteView extends SatelliteSettings {
   muted: boolean;
   /** Le satellite connecté annonce l’annulation d’écho (condition de l’écoute attentive). */
   aec: boolean;
+  /** Extension locale : caméra pour décrire la scène sur demande. */
+  camera?: boolean;
 }
 
 /** Un satellite neuf, connecté sans jeton, qui attend qu’on l’associe. */

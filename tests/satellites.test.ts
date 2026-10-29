@@ -243,13 +243,12 @@ test('veille : le son suit « listen », la détection revient au satellite', as
     led: { color: '#00ffb4', brightness: 6, nightLight: false },
     attentive: false,
   });
-  // Mot d’appel désactivé : le satellite n’envoie rien.
+  // Le satellite écoute même si le miroir n'utilise pas le mot d'appel.
+  assert.equal(f.controller.wakeWordState().enabled, false);
   assert.deepEqual(await device.next((message) => message.type === 'listen'), {
     type: 'listen',
-    enabled: false,
+    enabled: true,
   });
-  f.controller.setWakeWordEnabled(true);
-  await device.next((message) => message.type === 'listen' && message.enabled);
   const start = await worker.next((message) => message.type === 'wake_start');
   device.socket.send(Buffer.alloc(2560, 1));
   const frame: Buffer = await worker.next((message) => Buffer.isBuffer(message));
@@ -404,4 +403,34 @@ test('association : un satellite neuf attend, clignote, puis reçoit son jeton',
     ).statusCode,
     404,
   );
+});
+
+test('éclairage satellite : accès administrateur, validation et persistance isolée', async (t) => {
+  const f = await fixture(t);
+  const cookie = await f.admin();
+  assert.equal((await f.app.inject('/api/admin/satellites/lighting-catalog')).statusCode, 401);
+  const create = await f.app.inject({
+    method: 'POST',
+    url: '/api/admin/satellites',
+    headers: { origin, cookie },
+    payload: { name: 'Pièce test' },
+  });
+  const id = create.json().satellite.id;
+  const write = (lighting: unknown) =>
+    f.app.inject({
+      method: 'PATCH',
+      url: '/api/admin/satellites/' + id,
+      headers: { origin, cookie },
+      payload: { lighting },
+    });
+  const empty = { areaId: null, defaultEntityIds: [], allEntityIds: [] };
+  assert.equal((await write({ ...empty, defaultEntityIds: ['switch.unknown'] })).statusCode, 400);
+  assert.equal((await write({ ...empty, areaId: 'unknown_area' })).statusCode, 400);
+  assert.equal(
+    (await write({ ...empty, defaultEntityIds: ['light.a', 'light.a'] })).statusCode,
+    400,
+  );
+  assert.equal((await write(empty)).statusCode, 200);
+  const read = await f.app.inject({ url: '/api/admin/satellites', headers: { cookie } });
+  assert.deepEqual(read.json().satellites.find((s: { id: string }) => s.id === id).lighting, empty);
 });

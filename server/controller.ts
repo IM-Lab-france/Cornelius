@@ -373,6 +373,11 @@ export class SessionController {
     );
   }
 
+  /** Les satellites utilisent toujours leur mot d'appel, indépendamment du miroir. */
+  isSatelliteWakeListening(): boolean {
+    return this.wakeWordReady && ['idle', 'blocked'].includes(this.session.phase);
+  }
+
   /** Santé caméra et cycle de regard tels que publiés, sans projection complète de l’état. */
   presenceScope(): { healthy: boolean; engagementId: string | null } {
     // Mode voix : la caméra n’est saine que pendant une conversation qui l’a allumée.
@@ -1147,7 +1152,7 @@ export class SessionController {
    * le satellite n’est rattaché à personne (il ne voit personne).
    */
   satelliteWake(satellite: { id: string; name: string; profileId?: string | null }): boolean {
-    if (!this.isWakeListening()) return false;
+    if (!this.isSatelliteWakeListening()) return false;
     const profile = satellite.profileId ? this.profiles.get(satellite.profileId) : null;
     if ((this.session.mode === 2 || this.knownPeopleOnly) && !profile) {
       this.diagnostic = satelliteMembersDiagnostic;

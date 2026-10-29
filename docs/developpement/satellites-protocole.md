@@ -68,7 +68,7 @@ Les autres messages sont des objets JSON en texte, avec un champ `type`. Un mess
 | `{"type":"session","state":"ready"}` | la conversation est ouverte : la voix de Cornelius arrive en binaire |
 | `{"type":"session","state":"closed"}` | la conversation est finie : arrêter la lecture |
 
-`listen` vaut `true` pendant la veille et pendant la conversation de ce satellite ; il passe à `false` quand le mot d’appel est désactivé ou pas prêt, ou qu’une conversation se tient ailleurs.
+`listen` vaut `true` pendant la veille si le modèle du mot d’appel est prêt, indépendamment du déclenchement du miroir, et pendant la conversation de ce satellite. Il passe à `false` quand le modèle n’est pas prêt ou qu’une conversation se tient ailleurs.
 
 ### Déroulé d’une conversation
 
@@ -125,3 +125,12 @@ Le simulateur envoie du silence, puis l’enregistrement, au rythme réel, affic
 
 - Mot d’appel détecté sur le satellite (`wake` envoyé par le satellite avec le son qui précède), vérifié par le serveur.
 - Bouton d’action, mise à jour du firmware.
+
+
+## Extension locale de caméra (compatible avec les satellites audio v1)
+
+`hello` peut annoncer `camera: true`. Sans cette capacité, le serveur conserve le comportement audio et le profil fixe. Cette capacité active uniquement la description de scène sur demande ; elle ne modifie pas le profil fixe et ne déclenche aucune capture au mot d’appel.
+
+Le serveur envoie `{"type":"camera_capture","requestId":"<UUID>"}`. Le satellite répond par une trame binaire : octet `0x4a`, UUID ASCII de 36 octets, JPEG (80 000 octets maximum), ou par `{"type":"camera_error","requestId":"<UUID>"}`. Une seule capture est en attente par connexion, délai de 8 s. Une réponse n’est recevable que pour la connexion et la requête qui l’ont demandée. Les trames PCM restent de 2 560 octets ; elles ne sont pas prises pour des images sur leur seul premier octet. La coupure du micro, la déconnexion et l’arrêt annulent les captures en attente.
+
+Le serveur envoie au worker local `satellite_vision` (un JPEG base64, date, question). `satellite_vision_result` renvoie la description locale. Aucune reconnaissance faciale du satellite. Les requêtes sont bornées à 240 Ko, sans stockage d’image. Résultat périmé ou conversation changée : rejet avant usage dans la conversation.

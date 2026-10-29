@@ -1,0 +1,171 @@
+import { useEffect, useState } from 'react';
+import type { SatelliteView, SatelliteLighting } from '../../../shared/satellites';
+import type { LightingCatalog } from '../../../shared/home-assistant';
+import { api } from '../../api';
+import { Button } from '../ui/button';
+import type { RunAction } from './types';
+
+const empty: SatelliteLighting = { areaId: null, defaultEntityIds: [], allEntityIds: [] };
+
+export function SatelliteLightingSettings({
+  satellite,
+  run,
+  onChanged,
+}: {
+  satellite: SatelliteView;
+  run: RunAction;
+  onChanged: () => void;
+}) {
+  const [catalog, setCatalog] = useState<LightingCatalog | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [config, setConfig] = useState<SatelliteLighting>(satellite.lighting ?? empty);
+  const id = 'lighting-' + satellite.id;
+  const refresh = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      setCatalog(await api.satelliteLightingCatalog());
+    } catch {
+      setError('Liste Home Assistant indisponible. Vérifiez sa connexion puis actualisez.');
+    } finally {
+      setLoading(false);
+    }
+  };
+  useEffect(() => {
+    void refresh();
+  }, []);
+  const configured = [...config.defaultEntityIds, ...config.allEntityIds];
+  const options = catalog?.lights.filter((e) => e.authorized || configured.includes(e.id)) ?? [];
+  const toggle = (key: 'defaultEntityIds' | 'allEntityIds', value: string) =>
+    setConfig((c) => ({
+      ...c,
+      [key]: c[key].includes(value) ? c[key].filter((v) => v !== value) : [...c[key], value],
+    }));
+  const auto =
+    catalog?.lights.filter(
+      (e) =>
+        e.domain === 'light' &&
+        e.areaId === config.areaId &&
+        config.areaId !== null &&
+        e.authorized,
+    ) ?? [];
+  const save = async () => {
+    const ok = await run('Éclairage du satellite enregistré.', () =>
+      api.updateSatellite(satellite.id, { lighting: config }),
+    );
+    if (ok) onChanged();
+  };
+  return (
+    <details className="rounded-lg border p-4">
+      <summary className="cursor-pointer font-medium">Éclairage de cette pièce</summary>
+      <div className="mt-4 space-y-4">
+        <p>
+          Sans pièce précisée, « allume la lumière » utilise les lampes par défaut ci-dessous. «
+          Toutes les lampes » vise cette pièce uniquement. Une autre pièce nommée explicitement
+          reste prioritaire.
+        </p>
+        <div className="space-y-2">
+          <label htmlFor={id + '-area'} className="block font-medium">
+            Pièce Home Assistant (facultative)
+          </label>
+          <select
+            id={id + '-area'}
+            className="w-full rounded-md border bg-background p-2"
+            value={config.areaId ?? ''}
+            onChange={(e) => setConfig((c) => ({ ...c, areaId: e.target.value || null }))}
+          >
+            <option value="">Groupe manuel uniquement</option>
+            {config.areaId && !catalog?.areas.some((a) => a.id === config.areaId) && (
+              <option value={config.areaId}>Pièce enregistrée actuellement indisponible</option>
+            )}
+            {catalog?.areas.map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.name}
+              </option>
+            ))}
+          </select>
+          <p className="text-muted-foreground">
+            Pour « toutes », les lumières autorisées du domaine light de cette pièce sont relues
+            depuis Home Assistant à chaque commande. Les prises reliées à des lampes se cochent dans
+            le groupe manuel.
+          </p>
+          {catalog && !catalog.areasAvailable && (
+            <p role="status">
+              Les pièces Home Assistant ne sont pas disponibles. Vous pouvez utiliser le groupe
+              manuel.
+            </p>
+          )}
+        </div>
+        {error && <p role="alert">{error}</p>}
+        {loading && <p role="status">Lecture des pièces et lampes…</p>}
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          disabled={loading}
+          onClick={() => void refresh()}
+        >
+          Actualiser les pièces et lampes
+        </Button>
+        <fieldset className="space-y-2">
+          <legend className="mb-2 font-medium">Lampes par défaut</legend>
+          <p className="text-muted-foreground">
+            Une ou plusieurs lampes pour « allume/éteins la lumière ». Choisissez uniquement les
+            interrupteurs qui commandent réellement un éclairage.
+          </p>
+          {options.map((e) => (
+            <label key={e.id} className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={config.defaultEntityIds.includes(e.id)}
+                onChange={() => toggle('defaultEntityIds', e.id)}
+              />
+              {e.name}
+              {!e.authorized ? ' — autorisation retirée' : ''}
+            </label>
+          ))}
+        </fieldset>
+        <fieldset className="space-y-2">
+          <legend className="mb-2 font-medium">Autres lampes pour « toutes les lampes »</legend>
+          <p className="text-muted-foreground">
+            Ajoutez ici un groupe manuel ou des prises d’éclairage. Les lampes par défaut sont
+            incluses automatiquement.
+          </p>
+          {options
+            .filter((e) => !config.defaultEntityIds.includes(e.id))
+            .map((e) => (
+              <label key={e.id} className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={config.allEntityIds.includes(e.id)}
+                  onChange={() => toggle('allEntityIds', e.id)}
+                />
+                {e.name}
+                {!e.authorized ? ' — autorisation retirée' : ''}
+              </label>
+            ))}
+        </fieldset>
+        {config.areaId && (
+          <p>
+            {auto.length} lumière(s) autorisée(s) actuellement trouvée(s) dans cette pièce Home
+            Assistant{auto.length ? ' : ' + auto.map((e) => e.name).join(', ') : ''}.
+          </p>
+        )}
+        {options.length === 0 && (
+          <p>
+            Aucune lampe autorisée disponible. Sélectionnez les appareils accessibles dans le module
+            Home Assistant, puis actualisez.
+          </p>
+        )}
+        <p className="text-muted-foreground">
+          Ce réglage n’ajoute aucune autorisation Home Assistant. Si aucune lampe n’est configurée,
+          Cornelius demandera de préciser au lieu de choisir une autre pièce.
+        </p>
+        <Button type="button" disabled={loading || !catalog} onClick={() => void save()}>
+          Enregistrer l’éclairage de {satellite.name}
+        </Button>
+      </div>
+    </details>
+  );
+}

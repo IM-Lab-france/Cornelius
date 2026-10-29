@@ -1,3 +1,5 @@
+import { SatelliteLightingBridge } from '../server/satellite-lighting.js';
+import type { HomeAssistant } from '../server/home-assistant.js';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import test, { type TestContext } from 'node:test';
@@ -87,6 +89,29 @@ const tone = (amplitude: number, bytes = 3200) => {
 const delta = (pcm: Buffer) => ({
   type: 'session.output_audio.delta',
   delta: pcm.toString('base64'),
+});
+
+test('satellite : le miroir garde le regard et le satellite ouvre à la voix', (t) => {
+  const f = fixture(t);
+  f.controller.setOpening({ trigger: 'gaze', audience: 'everyone', recognizeVoice: false });
+  const opening = f.controller.opening();
+  assert.equal(f.controller.isWakeListening(), false);
+  assert.equal(f.controller.isSatelliteWakeListening(), true);
+  assert.equal(f.controller.wakeDetected(), false);
+  assert.equal(f.controller.satelliteWake(bureau), true);
+  assert.deepEqual(f.controller.opening(), opening);
+  assert.equal(f.controller.isSatelliteWakeListening(), false);
+  assert.equal(f.controller.satelliteWake({ id: 'other', name: 'Cuisine' }), false);
+  assert.equal(f.sessions.length, 1);
+});
+
+test('satellite : aucun déclenchement si le modèle du mot d’appel est indisponible', (t) => {
+  const f = fixture(t);
+  f.controller.setWakeWordEnabled(false);
+  f.controller.setWakeWordAvailability(false, 'Indisponible');
+  assert.equal(f.controller.isSatelliteWakeListening(), false);
+  assert.equal(f.controller.satelliteWake(bureau), false);
+  assert.equal(f.sessions.length, 0);
 });
 
 test('satellite : session Live sur WebSocket, voix seule, sans navigateur ni caméra', (t) => {
@@ -326,4 +351,113 @@ test('satellite avec annulation d’écho : le micro reste ouvert pendant que Co
   f.emit(delta(tone(8000)));
   f.live.satelliteAudio(bureau.id, tone(3000), true);
   assert.equal(f.audio.at(-1)!.readInt16LE(0), -3000);
+});
+
+test('caméra satellite : captures liées à la connexion, annulation et profil fixe sans capture à l’ouverture', async (t) => {
+  const f = fixture(t);
+  const store = new SatelliteStore(f.db, Date.now);
+  const fixed = f.profiles.create('Profil fixe');
+  const created = store.create('Caméra');
+  const satellite = store.update(created.satellite.id, { profileId: fixed.id })!;
+  let detected!: (score: number) => void;
+  const hub = new SatelliteHub({
+    store,
+    controller: f.controller,
+    logs: new DiagnosticLog(),
+    heartbeat: false,
+    live: null,
+    arbiter: new WakeArbiter(() => 1),
+    perception: {
+      startWakeStream: (_id: string, cb: (score: number) => void) => {
+        detected = cb;
+        return true;
+      },
+      endWakeStream() {},
+      wakeAudio() {},
+    } as unknown as PerceptionBridge,
+  });
+  t.after(() => hub.dispose());
+  const socket = new FakeSocket();
+  hub.connect(socket as unknown as WebSocket, satellite);
+  socket.receive({ type: 'hello', protocol: 1, firmware: 'camera', camera: true });
+  const detectedCamera = detected;
+  const other = new FakeSocket();
+  hub.connect(other as unknown as WebSocket, store.create('Autre').satellite);
+  other.receive({ type: 'hello', protocol: 1, firmware: 'camera', camera: true });
+  const capture = hub.capture(satellite.id);
+  const request = socket.messages().find((m) => m.type === 'camera_capture');
+  const jpeg = Buffer.from([255, 216, 1, 255, 217]);
+  const frame = Buffer.concat([Buffer.from([0x4a]), Buffer.from(request.requestId), jpeg]);
+  other.receive(frame);
+  socket.receive(frame);
+  assert.equal((await capture).jpeg, jpeg.toString('base64'));
+  const abort = new AbortController();
+  const cancelled = hub.capture(satellite.id, abort.signal);
+  abort.abort();
+  await assert.rejects(cancelled, /annulée/);
+  detectedCamera(0.9);
+  assert.equal(f.controller.snapshot().state.activeProfile?.id, fixed.id);
+  assert.equal(socket.messages().filter((m) => m.type === 'camera_capture').length, 2);
+});
+
+test('transport satellite : outil de pièce exposé et appel transmis au résolveur local', async (t) => {
+  const f = fixture(t);
+  const store = new SatelliteStore(f.db, Date.now);
+  const sat = store.create('Bureau').satellite;
+  const profile = f.profiles.create('Cédric');
+  store.update(sat.id, {
+    lighting: { areaId: null, defaultEntityIds: ['switch.office_lamp'], allEntityIds: [] },
+  });
+  const commands: string[] = [];
+  const home = {
+    tools: () => [{ name: 'home_assistant__control' }],
+    lightingCatalog: async () => ({
+      areasAvailable: false,
+      areas: [],
+      lights: [
+        {
+          id: 'switch.office_lamp',
+          name: 'Lampe',
+          domain: 'switch',
+          areaId: null,
+          authorized: true,
+        },
+      ],
+    }),
+    run: async (args: { entityId: string }) => {
+      commands.push(args.entityId);
+      return { status: 'succeeded', result: { confirmed: true } };
+    },
+  } as unknown as HomeAssistant;
+  f.live.attachRoomLighting(new SatelliteLightingBridge(store, home, f.controller));
+  f.controller.satelliteWake({ id: sat.id, name: 'Bureau', profileId: profile.id });
+  const session = f.sessions[0]!;
+  assert.equal(session.delegation?.type, 'responses');
+  if (session.delegation?.type === 'responses')
+    assert.ok(
+      session.delegation.responses.tools?.some(
+        (tool) => 'name' in tool && tool.name === 'home_assistant__room_lights',
+      ),
+    );
+  f.emit({ type: 'session.started', event_id: 'e1', session: { id: 'live_lighting' } });
+  f.emit({
+    type: 'response.event',
+    delegation_id: 'lights',
+    event: {
+      type: 'response.output_item.done',
+      item: {
+        type: 'function_call',
+        call_id: 'room-call',
+        name: 'home_assistant__room_lights',
+        arguments: JSON.stringify({ room: null, scope: 'default', action: 'turn_on' }),
+      },
+    },
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(commands, ['switch.office_lamp']);
+  const output = f.sent.find(
+    (e) =>
+      e.type === 'response.item.create' && 'item' in e && e.item.type === 'function_call_output',
+  );
+  assert.ok(output);
 });

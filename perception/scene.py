@@ -691,7 +691,7 @@ class SceneWorker:
         self.thread = threading.Thread(target=self._run, daemon=True)
         self.thread.start()
 
-    def request(self, request_id, trigger, question=None):
+    def request(self, request_id, trigger, question=None, image=None):
         try:
             visual_instruction(trigger, question)
         except SceneUnavailable as error:
@@ -699,7 +699,7 @@ class SceneWorker:
             return
         with self.condition:
             replaced = self.pending
-            self.pending = ("describe", request_id, trigger, question if trigger == "tool" else None)
+            self.pending = ("describe", request_id, trigger, question if trigger == "tool" else None, image)
             self.condition.notify()
         if replaced and replaced[0] == "describe":
             self._emit(replaced[1], replaced[2], "failed", "Requête remplacée par une plus récente.")
@@ -777,7 +777,7 @@ class SceneWorker:
             if job[0] == "warm":
                 self._warm()
             else:
-                self._describe(job[1], job[2], job[3])
+                self._describe(job[1], job[2], job[3], job[4] if len(job)>4 else None)
 
     def _warm(self):
         try:
@@ -799,7 +799,7 @@ class SceneWorker:
             }
         )
 
-    def _describe(self, request_id, trigger, question):
+    def _describe(self, request_id, trigger, question, image=None):
         try:
             self.captioner.load()
             self._emit_status_ready()
@@ -814,7 +814,7 @@ class SceneWorker:
         with self.condition:
             if not self.running or self.active_generation != self.generation:
                 return
-        frame, captured_at = self.frames()
+        frame, captured_at = image if image is not None else self.frames()
         if frame is None:
             self._emit(request_id, trigger, "unavailable", "Aucune image récente.", captured_at=0)
             return

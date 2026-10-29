@@ -14,6 +14,7 @@ from wake import WakeDetector
 from camera import Camera
 from browser_camera import BrowserCamera
 from enrollment import Enrollment
+from satellite_camera import decode_frames
 from scene import MODEL_DIRECTORIES, SceneCaptioner, SceneWorker
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -66,6 +67,8 @@ class Worker:
         self.loop = None
         self.camera_lock = None
         self.camera_tasks = set()
+        self.satellite_task = None
+        self.satellite_descriptions = {}
 
     def enable_camera(self, preferred=None, mode=None):
         status = self.camera.enable(preferred, mode)
@@ -142,6 +145,16 @@ class Worker:
             self.scene = SceneWorker(self.captioner, lambda: self.camera.frame(), self.vision_emit)
         return self.scene
 
+    async def satellite_vision(self, socket, event):
+        request_id = event.get("requestId")
+        try:
+            decoded = await asyncio.to_thread(decode_frames, event.get("images"))
+            self.satellite_descriptions[request_id] = True
+            self.scene_worker().request(request_id, "tool", event.get("question"), image=decoded[-1])
+        except Exception:
+            await socket.send(json.dumps({"type": "satellite_vision_result", "requestId": request_id,
+                                          "error": "Caméra du satellite indisponible."}))
+
     def set_vision_model(self, requested, device=None, reload=False):
         """Switch model/device on the existing inference thread, without blocking audio."""
         if not isinstance(requested, str) or requested not in MODEL_DIRECTORIES:
@@ -164,6 +177,9 @@ class Worker:
     async def vision_events(self, socket):
         while True:
             event = await self.vision_queue.get()
+            if event.get("type") == "vision_result" and event.get("requestId") in self.satellite_descriptions:
+                self.satellite_descriptions.pop(event["requestId"], None)
+                event = {**event, "type": "satellite_vision_result"}
             await socket.send(json.dumps(event))
 
     async def observations(self, socket):
@@ -327,6 +343,11 @@ class Worker:
                     self.scene.cancel("Analyse annulée par le serveur.")
             elif event["type"] == "vision":
                 self.scene_worker().request(event["requestId"], event["trigger"], event.get("question"))
+            elif event["type"] == "satellite_vision":
+                if self.satellite_task and not self.satellite_task.done():
+                    await socket.send(json.dumps({"type": "satellite_vision_result", "requestId": event.get("requestId"), "error": "Analyse occupée."}))
+                else:
+                    self.satellite_task = asyncio.create_task(self.satellite_vision(socket, event))
             elif event["type"] == "vision_warm":
                 self.scene_worker().warm()
             elif event["type"] == "vision_model":
@@ -416,10 +437,13 @@ class Worker:
                             task.result()
                     finally:
                         pending = [*tasks, *self.camera_tasks]
+                        if self.satellite_task:
+                            pending.append(self.satellite_task)
                         for task in pending:
                             task.cancel()
                         await asyncio.gather(*pending, return_exceptions=True)
                         self.camera_tasks.clear()
+                        self.satellite_descriptions.clear()
                         self.camera_lock = None
                         if self.scene:
                             self.scene.cancel("Perception déconnectée.")

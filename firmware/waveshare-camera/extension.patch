@@ -1,0 +1,513 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 8c0ba1c..a7bc772 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -1,7 +1,7 @@
+ cmake_minimum_required(VERSION 3.16)
+ 
+ # Version annoncée à Cornelius dans « hello » (32 caractères au plus).
+-set(PROJECT_VER "0.3.0")
++set(PROJECT_VER "0.3.0-fozzy-ota3")
+ 
+ include($ENV{IDF_PATH}/tools/cmake/project.cmake)
+ project(cornelius-satellite)
+diff --git a/dependencies.lock b/dependencies.lock
+index 70734d2..7c4e85e 100644
+--- a/dependencies.lock
++++ b/dependencies.lock
+@@ -75,6 +75,20 @@ dependencies:
+       registry_url: https://components.espressif.com/
+       type: service
+     version: 2.6.0
++  espressif/esp32-camera:
++    component_hash: d1770097ec47996a9aba49b8d99672863c9855ea2d47e91fe31e11e58e8c7813
++    dependencies:
++    - name: espressif/esp_jpeg
++      registry_url: https://components.espressif.com
++      require: public
++      version: ^1.3.1
++    - name: idf
++      require: private
++      version: '>=5.1'
++    source:
++      registry_url: https://components.espressif.com/
++      type: service
++    version: 2.1.8
+   espressif/esp_codec_dev:
+     component_hash: 4779f31a3ba3f9b38aee1afe6ccb9ba8f6108dc3a6e77d39d7d714e9a215371b
+     dependencies:
+@@ -109,6 +123,16 @@ dependencies:
+       registry_url: https://components.espressif.com/
+       type: service
+     version: 2.0.2
++  espressif/esp_jpeg:
++    component_hash: 47d19eac5f76fac06798c04f4d2579c7ab26fd33280ed10f43d8895175376bdf
++    dependencies:
++    - name: idf
++      require: private
++      version: '>=5.0'
++    source:
++      registry_url: https://components.espressif.com
++      type: service
++    version: 1.3.2
+   espressif/esp_new_jpeg:
+     component_hash: e1e7e6991193c41ed6c9fc386702aa7821433319e7aa9c3147cd3236310cd69c
+     dependencies: []
+@@ -161,15 +185,16 @@ dependencies:
+   idf:
+     source:
+       type: idf
+-    version: 5.5.6
++    version: 5.5.5
+ direct_dependencies:
+ - espressif/esp-sr
++- espressif/esp32-camera
+ - espressif/esp_codec_dev
+ - espressif/esp_io_expander_tca95xx_16bit
+ - espressif/esp_websocket_client
+ - espressif/led_strip
+ - espressif/mdns
+ - idf
+-manifest_hash: 6b1adebad4b4015f41209c4399c31feb6cccabf6a5dc4f858bc8677323ff279e
++manifest_hash: 6084eedd606acfe6f06a940d710a1ba1c845da2fff6f283b0fa1624a7e63ee7f
+ target: esp32s3
+ version: 2.0.0
+diff --git a/main/CMakeLists.txt b/main/CMakeLists.txt
+index 4426ecf..acfff59 100644
+--- a/main/CMakeLists.txt
++++ b/main/CMakeLists.txt
+@@ -1,5 +1,6 @@
+ idf_component_register(
+-    SRCS "main.c" "board.c" "audio.c" "link.c" "leds.c" "button.c" "wifi.c" "config.c" "discovery.c" "portal.c" "echo.c"
++    SRCS "ota.c" "camera.c" "main.c" "board.c" "audio.c" "link.c" "leds.c" "button.c" "wifi.c" "config.c" "discovery.c" "portal.c" "echo.c"
+     INCLUDE_DIRS "."
+-    REQUIRES esp_driver_i2c esp_driver_i2s esp_driver_gpio esp_wifi esp_event esp_netif esp_timer esp_app_format esp_ringbuf nvs_flash json mbedtls esp_http_server
++    PRIV_REQUIRES esp32-camera
++    REQUIRES app_update esp_driver_i2c esp_driver_i2s esp_driver_gpio esp_wifi esp_event esp_netif esp_timer esp_app_format esp_ringbuf nvs_flash json mbedtls esp_http_server
+ )
+diff --git a/main/Kconfig.projbuild b/main/Kconfig.projbuild
+index 02fd727..a67c839 100644
+--- a/main/Kconfig.projbuild
++++ b/main/Kconfig.projbuild
+@@ -1,5 +1,11 @@
+ menu "Satellite Cornelius"
+ 
++    config SATELLITE_HOSTNAME
++        string "Nom réseau DHCP et mDNS (minuscules, chiffres, tirets)"
++        default ""
++        help
++            Exemple : cornelius-salon. Vide : nom unique basé sur la MAC.
++
+     config SATELLITE_WIFI_SSID
+         string "Wi-Fi : nom du réseau (2,4 GHz)"
+         default ""
+diff --git a/main/audio.c b/main/audio.c
+index 82ea5cd..b0e728d 100644
+--- a/main/audio.c
++++ b/main/audio.c
+@@ -1,6 +1,7 @@
+ #include "audio.h"
+ 
+ #include <stdbool.h>
++#include <stdlib.h>
+ #include <string.h>
+ #include "board.h"
+ #include "echo.h"
+@@ -32,6 +33,8 @@ static void capture_task(void *arg)
+     static int16_t frame[LINK_FRAME_SAMPLES];
+     static int16_t raw[LINK_FRAME_SAMPLES * BOARD_MIC_CHANNELS];
+     int64_t last = esp_timer_get_time();
++    unsigned frames = 0;
++    int peak0 = 0, peak1 = 0, peak_out = 0;
+     for (;;) {
+         /* Le micro est toujours lu, pour que le tampon I2S ne déborde jamais ; la trame ne
+          * part que si Cornelius la demande et que le micro n'est pas coupé. */
+@@ -51,6 +54,18 @@ static void capture_task(void *arg)
+         } else {
+             for (size_t i = 0; i < LINK_FRAME_SAMPLES; i++) frame[i] = raw[2 * i];
+         }
++        for (size_t i = 0; i < LINK_FRAME_SAMPLES; i++) {
++            int a = abs((int)raw[i * BOARD_MIC_CHANNELS]);
++            int b = BOARD_MIC_CHANNELS > 1 ? abs((int)raw[i * BOARD_MIC_CHANNELS + 1]) : 0;
++            int c = abs((int)frame[i]);
++            if (a > peak0) peak0 = a;
++            if (b > peak1) peak1 = b;
++            if (c > peak_out) peak_out = c;
++        }
++        if (++frames % 25 == 0) {
++            ESP_LOGI(TAG, "Mic frames=%u ch0=%d ch1=%d output=%d listen=%d muted=%d", frames, peak0, peak1, peak_out, satellite.listen, satellite.muted);
++            peak0 = peak1 = peak_out = 0;
++        }
+         link_send_frame(frame);
+     }
+ }
+diff --git a/main/board.c b/main/board.c
+index ecc2750..092ecc4 100644
+--- a/main/board.c
++++ b/main/board.c
+@@ -34,6 +34,14 @@ static i2s_chan_handle_t rx_handle;
+ static esp_codec_dev_handle_t speaker;
+ static esp_codec_dev_handle_t microphone;
+ 
++esp_err_t board_camera_power(bool enabled)
++{
++    uint32_t pins = IO_EXPANDER_PIN_NUM_5 | IO_EXPANDER_PIN_NUM_6;
++    ESP_RETURN_ON_ERROR(esp_io_expander_set_dir(expander, pins, IO_EXPANDER_OUTPUT), TAG, "camera pins");
++    ESP_RETURN_ON_ERROR(esp_io_expander_set_level(expander, IO_EXPANDER_PIN_NUM_6, 1), TAG, "camera route");
++    return esp_io_expander_set_level(expander, IO_EXPANDER_PIN_NUM_5, enabled ? 0 : 1);
++}
++
+ static esp_err_t init_i2c(void)
+ {
+     const i2c_master_bus_config_t config = {
+@@ -185,12 +193,20 @@ static esp_err_t init_codecs(void)
+     };
+     ESP_RETURN_ON_FALSE(esp_codec_dev_open(microphone, &in_fs) == ESP_CODEC_DEV_OK, ESP_FAIL,
+                         TAG, "ouverture des micros");
+-    esp_codec_dev_set_in_channel_gain(microphone, ESP_CODEC_DEV_MAKE_CHANNEL_MASK(0),
+-                                      CONFIG_SATELLITE_MIC_GAIN_DB);
++    /* +6 dB over the original setting, bounded by the ES7210's supported gain.
++     * Analog gain improves low microphone levels before conversion. */
++    const int mic_gain = CONFIG_SATELLITE_MIC_GAIN_DB + 6 > 37 ? 37 : CONFIG_SATELLITE_MIC_GAIN_DB + 6;
++    ESP_RETURN_ON_FALSE(esp_codec_dev_set_in_channel_gain(microphone,
++                            ESP_CODEC_DEV_MAKE_CHANNEL_MASK(0) | ESP_CODEC_DEV_MAKE_CHANNEL_MASK(1),
++                            mic_gain) == ESP_CODEC_DEV_OK, ESP_FAIL, TAG, "gain micros");
+ #ifdef CONFIG_SATELLITE_AEC
+-    /* La référence est le signal du haut-parleur lui-même : sans gain, pour ne pas saturer. */
+-    esp_codec_dev_set_in_channel_gain(microphone, ESP_CODEC_DEV_MAKE_CHANNEL_MASK(1), 0);
++    /* TDM slot 1 is physical MIC3, not MIC2. Gain masks address physical ADCs.
++     * The reference must use mask 2; mask 1 incorrectly turned down the second mic. */
++    ESP_RETURN_ON_FALSE(esp_codec_dev_set_in_channel_gain(microphone,
++                            ESP_CODEC_DEV_MAKE_CHANNEL_MASK(2), 0) == ESP_CODEC_DEV_OK,
++                            ESP_FAIL, TAG, "gain reference echo");
+ #endif
++    ESP_LOGI(TAG, "Microphone gain %d dB; echo reference on physical MIC3", mic_gain);
+ 
+     esp_codec_dev_sample_info_t out_fs = {
+         .bits_per_sample = 16,
+diff --git a/main/board.h b/main/board.h
+index d9372a3..9962236 100644
+--- a/main/board.h
++++ b/main/board.h
+@@ -2,6 +2,7 @@
+ 
+ #include <stddef.h>
+ #include <stdint.h>
++#include <stdbool.h>
+ #include "esp_err.h"
+ 
+ #include "sdkconfig.h"
+@@ -28,3 +29,4 @@ esp_err_t board_speaker_write(const int16_t *samples, size_t count);
+ 
+ /** Volume du haut-parleur, de 0 à 100. */
+ void board_set_volume(int volume);
++esp_err_t board_camera_power(bool enabled);
+diff --git a/main/config.c b/main/config.c
+index 53e6be2..16d57ff 100644
+--- a/main/config.c
++++ b/main/config.c
+@@ -44,6 +44,10 @@ void config_load(void)
+ 
+ const satellite_config_t *config_get(void)
+ {
++    /* Across the IoT VLAN mDNS is unavailable. A blank portal field keeps
++     * the configured server fallback, without touching saved Wi-Fi secrets. */
++    if (!current.server_uri[0] && CONFIG_SATELLITE_SERVER_URI[0])
++        strlcpy(current.server_uri, CONFIG_SATELLITE_SERVER_URI, sizeof(current.server_uri));
+     return &current;
+ }
+ 
+diff --git a/main/discovery.c b/main/discovery.c
+index 8f7098a..9a9dd04 100644
+--- a/main/discovery.c
++++ b/main/discovery.c
+@@ -6,6 +6,7 @@
+ #include "esp_mac.h"
+ #include "esp_netif.h"
+ #include "mdns.h"
++#include "sdkconfig.h"
+ 
+ static const char *TAG = "discovery";
+ static char name[40];
+@@ -18,7 +19,8 @@ void discovery_start(void)
+     }
+     uint8_t mac[6];
+     esp_read_mac(mac, ESP_MAC_WIFI_STA);
+-    snprintf(name, sizeof(name), "cornelius-satellite-%02x%02x%02x", mac[3], mac[4], mac[5]);
++    if (CONFIG_SATELLITE_HOSTNAME[0]) snprintf(name, sizeof(name), "%s", CONFIG_SATELLITE_HOSTNAME);
++    else snprintf(name, sizeof(name), "cornelius-satellite-%02x%02x%02x", mac[3], mac[4], mac[5]);
+     mdns_hostname_set(name);
+     ESP_LOGI(TAG, "Nom sur le réseau : %s.local", name);
+ }
+diff --git a/main/idf_component.yml b/main/idf_component.yml
+index 438b279..9fd41f2 100644
+--- a/main/idf_component.yml
++++ b/main/idf_component.yml
+@@ -1,4 +1,5 @@
+ dependencies:
++  espressif/esp32-camera: "^2.1"
+   idf: ">=5.4"
+   espressif/esp_codec_dev: "^1.3"
+   espressif/esp_websocket_client: "^1.4"
+diff --git a/main/leds.c b/main/leds.c
+index 129238a..deba572 100644
+--- a/main/leds.c
++++ b/main/leds.c
+@@ -63,6 +63,7 @@ static void render(float seconds, int64_t now_us)
+         return fill(white, ((now_us / 250000) % 2) ? 0.9f : 0);
+     /* Portail de configuration ouvert : bleu qui respire. */
+     if (satellite.setup && !satellite.wifi) return fill(blue, pulse(seconds, 3.0f));
++    if (satellite.updating) return fill(orange, pulse(seconds, 0.5f));
+     if (satellite.muted) return fill(red, 0.35f);
+     if (!satellite.wifi) return spin(blue, seconds);
+     /* En attente d'association : blanc qui respire. */
+@@ -71,11 +72,23 @@ static void render(float seconds, int64_t now_us)
+     if (now_us - satellite.busy_at_us < 1200000)
+         return fill(amber, ((now_us - satellite.busy_at_us) / 200000) % 2 ? 0 : 0.8f);
+     if (satellite.conversation == CONVERSATION_CONNECTING) return spin(accent, seconds);
+-    if (satellite.conversation == CONVERSATION_READY)
+-        return fill(accent, satellite.speaking ? pulse(seconds, 0.6f) : 0.3f);
++    if (satellite.conversation == CONVERSATION_READY) {
++        /* Vert fixe : session prête, en attente de la commande. */
++        const color_t listening = {0, satellite.led_brightness * LED_FULL / 10, 0};
++        return satellite.speaking ? fill(accent, pulse(seconds, 0.6f)) : fill(listening, 0.3f);
++    }
+     if (now_us - satellite.wake_at_us < 400000) return fill(accent, 1.0f);
+-    /* Veille : éteint, ou veilleuse, une lueur faible de la couleur principale. */
+-    fill(accent, satellite.night_light ? 0.08f : 0);
++    /* Continuous circular glow: smooth crossover instead of a hard leading edge.
++     * A two-second revolution and broader glow hide the seven-LED spacing. */
++    const float head = fmodf(seconds * LED_COUNT / 2.0f, LED_COUNT);
++    const float intensity = satellite.night_light ? 0.2f : 0.45f;
++    for (int i = 0; i < LED_COUNT; i++) {
++        float distance = fabsf(head - i);
++        if (distance > LED_COUNT / 2.0f) distance = LED_COUNT - distance;
++        const float shape = distance < 2.0f ? 0.5f + 0.5f * cosf(distance * (float)M_PI / 2.0f) : 0;
++        const float level = shape * intensity;
++        led_strip_set_pixel(strip, i, accent.r * level, accent.g * level, accent.b * level);
++    }
+ }
+ 
+ static void leds_task(void *arg)
+@@ -85,7 +98,7 @@ static void leds_task(void *arg)
+         const int64_t now = esp_timer_get_time();
+         render((now - start) / 1e6f, now);
+         led_strip_refresh(strip);
+-        vTaskDelay(pdMS_TO_TICKS(33));
++        vTaskDelay(pdMS_TO_TICKS(16));
+     }
+ }
+ 
+diff --git a/main/link.c b/main/link.c
+index 1c5be39..c1b3722 100644
+--- a/main/link.c
++++ b/main/link.c
+@@ -5,6 +5,7 @@
+ #include <stdio.h>
+ #include <string.h>
+ #include "audio.h"
++#include "camera.h"
+ #include "board.h"
+ #include "cJSON.h"
+ #include "config.h"
+@@ -131,6 +132,7 @@ static void send_hello(void)
+     cJSON_AddNumberToObject(hello, "protocol", SATELLITE_PROTOCOL);
+     cJSON_AddStringToObject(hello, "firmware", esp_app_get_description()->version);
+     cJSON_AddBoolToObject(hello, "aec", echo_active());
++    cJSON_AddBoolToObject(hello, "camera", true);
+     send_json(hello);
+     if (satellite.muted) link_send_mic(true);
+ }
+@@ -162,7 +164,10 @@ static void handle_text(const char *body, size_t length)
+         cJSON_Delete(message);
+         return;
+     }
+-    if (strcmp(type, "waiting") == 0) {
++    if (strcmp(type, "camera_capture") == 0) {
++        const char *id=cJSON_GetStringValue(cJSON_GetObjectItem(message,"requestId"));
++        if (id && strlen(id)==36 && !satellite_camera_request(id)) link_camera_error(id);
++    } else if (strcmp(type, "waiting") == 0) {
+         satellite.pairing = true;
+         ESP_LOGI(TAG, "En attente d'association dans l'administration de Cornelius (%s)",
+                  discovery_device_name());
+@@ -239,6 +244,7 @@ static void on_event(void *arg, esp_event_base_t base, int32_t id, void *event_d
+         break;
+     case WEBSOCKET_EVENT_DISCONNECTED:
+     case WEBSOCKET_EVENT_CLOSED:
++        if (id == WEBSOCKET_EVENT_DISCONNECTED) satellite.ws_disconnects++;
+         ESP_LOGW(TAG, "WebSocket fermé");
+         offline();
+         break;
+@@ -259,6 +265,20 @@ static void on_event(void *arg, esp_event_base_t base, int32_t id, void *event_d
+         break;
+     }
+     case WEBSOCKET_EVENT_ERROR:
++        satellite.ws_errors++;
++        if (data) {
++            const int type=data->error_handle.error_type;
++            satellite.last_ws_error=type;
++            satellite.last_socket_errno=type==WEBSOCKET_ERROR_TYPE_TCP_TRANSPORT ? data->error_handle.esp_transport_sock_errno : 0;
++            /* ERROR may precede the typed abort; its text explains the failure. */
++            if (data->data_ptr && data->data_len>0) {
++                const char *reason=data->data_ptr;
++                if (strstr(reason,"alloc") || strstr(reason,"memory")) satellite.last_ws_error=100;
++                else if (strstr(reason,"lock")) satellite.last_ws_error=101;
++                else if (strstr(reason,"write")) satellite.last_ws_error=102;
++                else if (strstr(reason,"poll")) satellite.last_ws_error=103;
++            }
++        }
+         ESP_LOGW(TAG, "Erreur WebSocket");
+         break;
+     default:
+@@ -350,7 +370,7 @@ static void start_client(const char *uri)
+ 
+ void link_send_frame(const int16_t *frame)
+ {
+-    if (!satellite.online || !satellite.listen || satellite.muted || !frames || !frame_pool)
++    if (!satellite.online || !satellite.listen || satellite.muted || satellite.updating || !frames || !frame_pool)
+         return;
+     /* La tâche du micro ne doit jamais attendre le Wi-Fi : la trame est copiée dans un
+      * emplacement libre et confiée à la tâche d'envoi. File pleine : la plus ancienne part. */
+@@ -364,6 +384,22 @@ void link_send_frame(const int16_t *frame)
+     }
+ }
+ 
++bool link_camera_frame(const char *id, const uint8_t *jpeg, size_t length) {
++    if (!client || !satellite.online || satellite.muted || length>80000) return false;
++    uint8_t *packet=heap_caps_malloc(length+37,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
++    if (!packet) return false;
++    packet[0]=0x4a; memcpy(packet+1,id,36); memcpy(packet+37,jpeg,length);
++    int sent=esp_websocket_client_send_bin(client,(const char *)packet,length+37,pdMS_TO_TICKS(5000));
++    free(packet);
++    return sent==(int)(length+37);
++}
++void link_camera_error(const char *id) {
++    cJSON *msg=cJSON_CreateObject();
++    cJSON_AddStringToObject(msg,"type","camera_error");
++    cJSON_AddStringToObject(msg,"requestId",id);
++    send_json(msg);
++}
++
+ /*
+  * Envoi du micro, à part : TCP rattrape un paquet perdu au bout d'1, 2 puis 4 s (mesuré). Une
+  * écriture qui dépasse son délai ferme la connexion WebSocket ; on lui laisse donc 10 s, et l'on
+@@ -395,6 +431,10 @@ static void sender_task(void *arg)
+         const int sent = esp_websocket_client_send_bin(client, (const char *)frame_pool[slot],
+                                                        FRAME_BYTES, pdMS_TO_TICKS(10000));
+         const int64_t took_ms = (esp_timer_get_time() - start) / 1000;
++        satellite.last_send_ms=(uint32_t)took_ms;
++        if ((uint32_t)took_ms>satellite.max_send_ms) satellite.max_send_ms=(uint32_t)took_ms;
++        if (sent<0) satellite.send_failures++;
++        if (took_ms>250) satellite.slow_sends++;
+         if (sent < 0) ESP_LOGW(TAG, "Envoi du micro échoué après %lld ms", took_ms);
+         else if (took_ms > 250) ESP_LOGW(TAG, "Envoi du micro lent : %lld ms", took_ms);
+     }
+diff --git a/main/link.h b/main/link.h
+index 2148897..e30e65c 100644
+--- a/main/link.h
++++ b/main/link.h
+@@ -20,3 +20,5 @@ void link_send_mic(bool muted);
+ 
+ /** Mesure à inscrire dans le journal de Cornelius (200 caractères, une par seconde au plus). */
+ void link_send_log(const char *message);
++bool link_camera_frame(const char *id, const uint8_t *jpeg, size_t length);
++void link_camera_error(const char *id);
+diff --git a/main/main.c b/main/main.c
+index 9db98da..210f39a 100644
+--- a/main/main.c
++++ b/main/main.c
+@@ -6,6 +6,8 @@
+  * haut-parleur est annulé sur la carte ; configuration par le portail puis l'association.
+  */
+ #include "audio.h"
++#include "ota.h"
++#include "camera.h"
+ #include "board.h"
+ #include "button.h"
+ #include "config.h"
+@@ -43,8 +45,10 @@ void app_main(void)
+     }
+     config_load_settings();
+     audio_start();
++    satellite_camera_start();
+     wifi_start();
+     discovery_start();
++    satellite_ota_start();
+     link_start();
+     ESP_LOGI(TAG, "Satellite démarré (mémoire interne libre : %u Ko, PSRAM : %u Ko)",
+              (unsigned)(heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024),
+diff --git a/main/state.h b/main/state.h
+index cd5395f..8be4b0a 100644
+--- a/main/state.h
++++ b/main/state.h
+@@ -15,6 +15,10 @@ typedef enum {
+  * écrivain ; les lectures d'un octet ou d'un entier aligné sont atomiques sur l'ESP32-S3.
+  */
+ typedef struct {
++    volatile uint32_t wifi_disconnects, ws_disconnects, ws_errors;
++    volatile int last_wifi_reason, last_ws_error, last_socket_errno;
++    volatile uint32_t send_failures, slow_sends, last_send_ms, max_send_ms;
++    volatile bool updating;      /* Authenticated OTA in progress. */
+     volatile bool wifi;          /* Wi-Fi connecté (wifi.c) */
+     volatile bool online;        /* « welcome » reçu (link.c) */
+     volatile bool listen;        /* le serveur demande le micro (link.c) */
+diff --git a/main/wifi.c b/main/wifi.c
+index 8ae25a8..e8f9222 100644
+--- a/main/wifi.c
++++ b/main/wifi.c
+@@ -5,6 +5,8 @@
+ #include "esp_log.h"
+ #include "esp_netif.h"
+ #include "esp_wifi.h"
++#include "esp_mac.h"
++#include <stdio.h>
+ #include "freertos/FreeRTOS.h"
+ #include "freertos/task.h"
+ #include "sdkconfig.h"
+@@ -32,6 +34,8 @@ static void on_event(void *arg, esp_event_base_t base, int32_t id, void *data)
+         if (!config_needs_setup()) esp_wifi_connect();
+     } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
+         if (config_needs_setup()) return;
++        satellite.wifi_disconnects++;
++        if (data) satellite.last_wifi_reason = ((wifi_event_sta_disconnected_t *)data)->reason;
+         satellite.wifi = false;
+         /* Le Wi-Fi enregistré ne marche pas : le portail rouvre pour le corriger, et les
+          * essais continuent en même temps (une box simplement éteinte reviendra). */
+@@ -51,7 +55,17 @@ void wifi_start(void)
+ {
+     ESP_ERROR_CHECK(esp_netif_init());
+     ESP_ERROR_CHECK(esp_event_loop_create_default());
+-    esp_netif_create_default_wifi_sta();
++    esp_netif_t *station = esp_netif_create_default_wifi_sta();
++    char hostname[40];
++    if (CONFIG_SATELLITE_HOSTNAME[0]) {
++        snprintf(hostname, sizeof(hostname), "%s", CONFIG_SATELLITE_HOSTNAME);
++    } else {
++        uint8_t mac[6];
++        ESP_ERROR_CHECK(esp_read_mac(mac, ESP_MAC_WIFI_STA));
++        snprintf(hostname, sizeof(hostname), "cornelius-satellite-%02x%02x%02x", mac[3], mac[4], mac[5]);
++    }
++    ESP_ERROR_CHECK(esp_netif_set_hostname(station, hostname));
++    ESP_LOGI(TAG, "Nom DHCP : %s", hostname);
+     const wifi_init_config_t init = WIFI_INIT_CONFIG_DEFAULT();
+     ESP_ERROR_CHECK(esp_wifi_init(&init));
+     ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, on_event, NULL));
+diff --git a/sdkconfig.defaults b/sdkconfig.defaults
+index 4948c14..af4934e 100644
+--- a/sdkconfig.defaults
++++ b/sdkconfig.defaults
+@@ -22,3 +22,14 @@ CONFIG_LWIP_TCP_WND_DEFAULT=16384
+ # Envoi du micro et réception de la voix en même temps : un verrou d'envoi à part, pour que
+ # l'un n'attende pas l'autre.
+ CONFIG_ESP_WS_CLIENT_SEPARATE_TX_LOCK=y
++CONFIG_SATELLITE_SERVER_URI="wss://192.168.10.10:3443/satellite"
++
++CONFIG_CAMERA_PSRAM_DMA=y
++
++CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
++
++# Control frames must outlast the 10 s audio send budget.
++CONFIG_ESP_WS_CLIENT_TX_LOCK_TIMEOUT_MS=12000
++
++# Preserve internal DRAM for real-time audio and Wi-Fi.
++CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y

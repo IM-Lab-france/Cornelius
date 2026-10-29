@@ -6,6 +6,7 @@ import {
   type HomeAssistantDomain,
   type HomeAssistantEntity,
   type HomeAssistantView,
+  type LightingCatalog,
 } from '../shared/home-assistant.js';
 import { compile } from '../shared/validation.js';
 import { safeUrl } from './addons/http.js';
@@ -283,6 +284,53 @@ export class HomeAssistant {
       selected: [...this.config.selected],
       revision: this.config.revision,
       knownPeopleOnly: this.config.knownPeopleOnly,
+    };
+  }
+  /** Registry reads only. No area service call: commands remain entity-scoped and authorized. */
+  async lightingCatalog(): Promise<LightingCatalog> {
+    const socket = this.socket;
+    let areas: LightingCatalog['areas'] = [];
+    const memberships = new Map<string, string>();
+    let areasAvailable = false;
+    if (socket && this.connected) {
+      try {
+        const [rawAreas, rawDevices, rawEntities] = await Promise.all([
+          socket.request('config/area_registry/list'),
+          socket.request('config/device_registry/list'),
+          socket.request('config/entity_registry/list'),
+        ]);
+        if (!Array.isArray(rawAreas) || !Array.isArray(rawDevices) || !Array.isArray(rawEntities))
+          throw new Error('Invalid registries');
+        areas = rawAreas
+          .map(record)
+          .filter((a) => typeof a.area_id === 'string' && typeof a.name === 'string')
+          .map((a) => ({ id: String(a.area_id), name: String(a.name).slice(0, 120) }));
+        const devices = new Map(rawDevices.map(record).map((d) => [d.id, d.area_id]));
+        const ids = new Set(areas.map((a) => a.id));
+        for (const entry of rawEntities.map(record)) {
+          const area =
+            typeof entry.area_id === 'string' ? entry.area_id : devices.get(entry.device_id);
+          if (typeof entry.entity_id === 'string' && typeof area === 'string' && ids.has(area))
+            memberships.set(entry.entity_id, area);
+        }
+        areasAvailable = this.socket === socket && this.connected;
+      } catch {
+        /* Manual lamp groups remain available when registries are unsupported. */
+      }
+    }
+    return {
+      areasAvailable,
+      areas: areasAvailable ? areas.sort((a, b) => a.name.localeCompare(b.name, 'fr')) : [],
+      lights: [...this.entities.values()]
+        .filter(isControllable)
+        .map((e) => ({
+          id: e.id,
+          name: e.name,
+          domain: e.domain,
+          areaId: areasAvailable ? (memberships.get(e.id) ?? null) : null,
+          authorized: this.config.selected.includes(e.id),
+        }))
+        .sort((a, b) => a.name.localeCompare(b.name, 'fr')),
     };
   }
   private checkRevision(revision: number) {

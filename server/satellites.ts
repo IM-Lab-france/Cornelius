@@ -27,6 +27,7 @@ interface Connection {
   firmware: string | null;
   /** Annulation d’écho annoncée par le satellite : pas de semi-duplex. */
   echoCancelled: boolean;
+  camera: boolean;
   muted: boolean;
   listening: boolean | null;
   alive: boolean;
@@ -47,6 +48,7 @@ export interface SatelliteStatus {
   muted: boolean;
   /** Annulation d’écho annoncée dans « hello ». */
   aec: boolean;
+  camera: boolean;
 }
 
 /** Réglages de l’administration, tels que le satellite les applique (message « settings »). */
@@ -71,6 +73,64 @@ const object = (value: unknown): Record<string, unknown> =>
  * l’arbitrage commun avec le miroir. Le son n’est demandé que pendant que la veille écoute.
  */
 export class SatelliteHub {
+  private cameraRequests = new Map<
+    string,
+    {
+      connection: Connection;
+      finish(error?: Error, image?: { jpeg: string; capturedAt: number }): void;
+    }
+  >();
+  cameraAvailable(id: string): boolean {
+    const connection = this.connections.get(id);
+    return (
+      !!connection?.firmware &&
+      connection.camera &&
+      !connection.muted &&
+      connection.socket.readyState === 1
+    );
+  }
+  capture(id: string, signal?: AbortSignal): Promise<{ jpeg: string; capturedAt: number }> {
+    const connection = this.connections.get(id);
+    if (
+      !connection ||
+      !this.cameraAvailable(id) ||
+      [...this.cameraRequests.values()].some((p) => p.connection === connection)
+    )
+      return Promise.reject(new Error('Caméra du satellite indisponible.'));
+    const requestId = randomUUID();
+    return new Promise((resolve, reject) => {
+      const abort = () => finish(new Error('Capture annulée.'));
+      const timer = setTimeout(() => finish(new Error('Capture expirée.')), 8000);
+      const finish = (error?: Error, image?: { jpeg: string; capturedAt: number }) => {
+        clearTimeout(timer);
+        signal?.removeEventListener('abort', abort);
+        this.cameraRequests.delete(requestId);
+        if (error) reject(error);
+        else resolve(image!);
+      };
+      this.cameraRequests.set(requestId, { connection, finish });
+      signal?.addEventListener('abort', abort, { once: true });
+      if (signal?.aborted) abort();
+      else this.send(connection, { type: 'camera_capture', requestId });
+    });
+  }
+  private cameraFrame(connection: Connection, frame: Buffer): boolean {
+    if (frame[0] !== 0x4a || !/^[0-9a-f-]{36}$/.test(frame.subarray(1, 37).toString('ascii')))
+      return false;
+    const request = this.cameraRequests.get(frame.subarray(1, 37).toString('ascii'));
+    if (!request || request.connection !== connection) return true;
+    const jpeg = frame.subarray(37);
+    if (
+      !this.cameraAvailable(connection.satellite.id) ||
+      jpeg.length < 4 ||
+      jpeg.length > 80000 ||
+      jpeg.readUInt16BE(0) !== 0xffd8 ||
+      jpeg.readUInt16BE(jpeg.length - 2) !== 0xffd9
+    )
+      request.finish(new Error('JPEG du satellite invalide.'));
+    else request.finish(undefined, { jpeg: jpeg.toString('base64'), capturedAt: Date.now() });
+    return true;
+  }
   private connections = new Map<string, Connection>();
   private pingTimer: ReturnType<typeof setInterval> | null = null;
   private unsubscribe: () => void;
@@ -105,8 +165,9 @@ export class SatelliteHub {
           firmware: connection.firmware,
           muted: connection.muted,
           aec: connection.echoCancelled,
+          camera: connection.camera,
         }
-      : { online: false, firmware: null, muted: false, aec: false };
+      : { online: false, firmware: null, muted: false, aec: false, camera: false };
   }
 
   connect(socket: WebSocket, satellite: Satellite): void {
@@ -117,6 +178,7 @@ export class SatelliteHub {
       streamId: randomUUID(),
       firmware: null,
       echoCancelled: false,
+      camera: false,
       muted: false,
       listening: null,
       alive: true,
@@ -144,8 +206,17 @@ export class SatelliteHub {
         return;
       }
       if (!connection.firmware) return this.hello(connection, message);
+      if (message.type === 'camera_error') {
+        const request = this.cameraRequests.get(String(message.requestId));
+        if (request?.connection === connection) request.finish(new Error('Capture impossible.'));
+        return;
+      }
       if (message.type === 'mic' && typeof message.muted === 'boolean') {
         connection.muted = message.muted;
+        if (connection.muted)
+          for (const pending of this.cameraRequests.values())
+            if (pending.connection === connection)
+              pending.finish(new Error('Micro et caméra coupés.'));
         this.deps.logs.write('info', 'local', 'Micro du satellite', {
           satellite: satellite.name,
           muted: message.muted,
@@ -197,6 +268,8 @@ export class SatelliteHub {
   }
 
   dispose(): void {
+    for (const pending of this.cameraRequests.values())
+      pending.finish(new Error('Arrêt du serveur.'));
     this.disposed = true;
     this.unsubscribe();
     if (this.pingTimer) clearInterval(this.pingTimer);
@@ -226,6 +299,7 @@ export class SatelliteHub {
     if (!this.startWake(connection)) return socket.close(1008, 'Écoute du mot d’appel saturée.');
     connection.firmware = message.firmware;
     connection.echoCancelled = message.aec === true;
+    connection.camera = message.camera === true;
     this.deps.store.seen(satellite.id);
     this.deps.logs.write('info', 'local', 'Satellite connecté', {
       satellite: satellite.name,
@@ -247,6 +321,7 @@ export class SatelliteHub {
     const { socket } = connection;
     if (!connection.firmware) return socket.close(1008, 'Message hello attendu.');
     const pcm = Buffer.isBuffer(data) ? data : Buffer.from(data as ArrayBuffer);
+    if (this.cameraFrame(connection, pcm)) return;
     if (pcm.length !== FRAME_BYTES) return socket.close(1008, 'Trame audio invalide.');
     // Trames encore en route après « listen: false », ou micro coupé : jamais analysées.
     if (connection.muted || !connection.listening) return;
@@ -280,7 +355,7 @@ export class SatelliteHub {
 
   private wakeAccepted(connection: Connection, score: number) {
     if (this.connections.get(connection.satellite.id) !== connection) return;
-    if (!this.deps.controller.isWakeListening()) return;
+    if (!this.deps.controller.isSatelliteWakeListening()) return;
     const rounded = Math.round(score * 100) / 100;
     this.send(connection, { type: 'wake', score: rounded });
     // Le son qui précède et suit le mot rejoindra Live : la question suit souvent sans pause.
@@ -304,7 +379,7 @@ export class SatelliteHub {
   /** Suit l’état publié : son demandé ou non, conversation de chaque satellite. */
   private sync() {
     const session = this.deps.controller.sessionState();
-    const wakeListening = this.deps.controller.isWakeListening();
+    const wakeListening = this.deps.controller.isSatelliteWakeListening();
     for (const connection of this.connections.values()) {
       if (!connection.firmware) continue;
       const mine = session.satellite?.id === connection.satellite.id;
@@ -375,6 +450,8 @@ export class SatelliteHub {
   }
 
   private closed(connection: Connection) {
+    for (const pending of this.cameraRequests.values())
+      if (pending.connection === connection) pending.finish(new Error('Satellite déconnecté.'));
     if (connection.helloTimer) clearTimeout(connection.helloTimer);
     // Fermetures dues à l’arrêt du serveur : la base est déjà fermée.
     if (this.disposed) return;

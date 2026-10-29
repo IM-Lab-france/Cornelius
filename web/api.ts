@@ -413,9 +413,24 @@ export const api = {
   changePassword: (current: string, next: string) =>
     post<{ ok: boolean }>('/api/admin/password', { current, next }),
   restartServer: () => post<{ ok: boolean }>('/api/admin/restart', {}),
+  satelliteLightingCatalog: () =>
+    request<import('../shared/home-assistant').LightingCatalog>(
+      '/api/admin/satellites/lighting-catalog',
+      { timeoutMs: 45000 },
+    ),
   satellites: () =>
     request<{ satellites: SatelliteView[]; pending?: PendingSatelliteView[] }>(
       '/api/admin/satellites',
+    ),
+  checkSatelliteCamera: (id: string) =>
+    request<{ ok: boolean; detail: string }>(
+      '/api/admin/satellites/' + encodeURIComponent(id) + '/camera/check',
+      { method: 'POST', body: '{}', timeoutMs: 70000 },
+    ),
+  previewSatelliteCamera: (id: string) =>
+    post<{ jpeg: string; capturedAt: number }>(
+      '/api/admin/satellites/' + encodeURIComponent(id) + '/camera/preview',
+      {},
     ),
   acceptSatellite: (device: string, name: string) =>
     post<{ satellite: SatelliteView }>(
@@ -435,7 +450,12 @@ export const api = {
     post<{ satellite: SatelliteView; token: string }>('/api/admin/satellites', { name }),
   updateSatellite: (
     id: string,
-    patch: { name?: string; profileId?: string | null; volume?: number },
+    patch: {
+      name?: string;
+      profileId?: string | null;
+      volume?: number;
+      lighting?: import('../shared/satellites').SatelliteLighting;
+    },
   ) =>
     request<{ satellite: SatelliteView }>('/api/admin/satellites/' + encodeURIComponent(id), {
       method: 'PATCH',
