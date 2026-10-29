@@ -126,13 +126,14 @@ test('la mémoire est autorisée par défaut et peut être refusée dès la cré
 
 test('supprimer un profil efface visage, souvenirs, style, repères, sources, commandes et agent, copies comprises', async (t) => {
   const directory = mkdtempSync(join(tmpdir(), 'cornelius-profiles-'));
-  t.after(() => rmSync(directory, { recursive: true, force: true }));
   const path = join(directory, 'cornelius.sqlite');
   const f = await fixture(t, path);
   const camille = (await f.create({ name: 'Camille' })).json<{ id: string }>();
   const robin = (await f.create({ name: 'Robin' })).json<{ id: string }>();
   const db = new DatabaseSync(path);
   t.after(() => db.close());
+  // Windows requires all SQLite handles closed before removing the directory.
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
   db.exec('PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;');
   const seed = (profileId: string) => {
     const now = Date.now();

@@ -4,7 +4,7 @@ Cette page explique comment installer Cornelius sur un ordinateur Linux (Debian,
 
 ## Ce qu’il faut
 
-- Un ordinateur x86-64 sous Debian, Ubuntu, Arch ou une dérivée. Le script reconnaît les familles Debian (dont Ubuntu) et Arch.
+- Un ordinateur x86-64 ou ARM64 sous Debian, Ubuntu, Arch ou une dérivée. Le script reconnaît les familles Debian (dont Ubuntu) et Arch. Sur Raspberry Pi, lisez aussi [Installer sur Raspberry Pi](raspberry-pi.md).
 - Un compte avec `sudo`, pour installer les paquets du système.
 - Une webcam, un micro, des haut-parleurs et un écran.
 - Un navigateur récent, par exemple Chromium ou Google Chrome.
@@ -58,7 +58,7 @@ Le script peut être relancé autant de fois que nécessaire. Il garde le fichie
 | Option | Effet |
 |---|---|
 | `--system-deps` | Installe les paquets du système avec `sudo` : apt sur Debian et Ubuntu, pacman sur Arch. |
-| `--gpu auto\|cpu\|nvidia\|amd` | Moteur de calcul de la vision locale. `auto` (par défaut) choisit NVIDIA si une carte NVIDIA répond, sinon le processeur. `amd` est réservé aux Radeon dédiées avec ROCm. Voir [GPU](gpu.md). |
+| `--gpu auto\|cpu\|nvidia\|amd` | Moteur de calcul de la vision locale. `auto` (par défaut) choisit NVIDIA si une carte NVIDIA répond, sinon le processeur. `amd` est réservé aux Radeon dédiées avec ROCm. En ARM64, seuls `auto` et `cpu` sont acceptés. Voir [GPU](gpu.md). |
 | `--wake` | Installe l’écoute locale du mot d’appel « Cornelius ». |
 | `--no-models` | Ne télécharge pas les modèles (visages, détection de la voix, vision 450M). |
 | `--no-build` | Ne compile pas l’interface. `scripts/start.sh` la compilera au premier démarrage. |

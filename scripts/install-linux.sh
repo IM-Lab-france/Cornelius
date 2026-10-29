@@ -1,13 +1,16 @@
 #!/usr/bin/env bash
-# Installe Cornelius sur Linux : Debian, Ubuntu, Arch et leurs dérivées.
+# Installe Cornelius sur Linux : Debian, Ubuntu, Arch et leurs dérivées, en x86-64 ou en ARM64
+# (Raspberry Pi 4 et 5 sous Raspberry Pi OS 64 bits compris).
 #
 # Usage : scripts/install-linux.sh [options]
 #   --system-deps         installe les paquets du système (apt ou pacman, avec sudo)
 #   --gpu auto|cpu|nvidia|amd
 #                         moteur ONNX de la vision locale (auto : NVIDIA si présent, sinon CPU ;
-#                         amd : MIGraphX, réservé aux Radeon dédiées prises en charge par ROCm)
+#                         amd : MIGraphX, réservé aux Radeon dédiées prises en charge par ROCm ;
+#                         CPU seulement en ARM64)
 #   --wake                installe le mot d’appel local (openWakeWord)
-#   --no-models           ne télécharge pas les modèles (visages, voix, vision 450m)
+#   --no-models           ne télécharge pas les modèles (visages, voix, vision 450m ; pas de
+#                         vision sur Raspberry Pi)
 #   --no-build            ne compile pas l’interface
 #   --systemd             installe et démarre les services utilisateur (serveur, perception)
 #   -h, --help            affiche cette aide
@@ -31,7 +34,7 @@ while [ $# -gt 0 ]; do
     --no-models) models=0 ;;
     --no-build) build=0 ;;
     --systemd) systemd=1 ;;
-    -h | --help) sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h | --help) sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "Option inconnue : $1 (voir --help)" >&2; exit 2 ;;
   esac
   shift
@@ -61,6 +64,21 @@ if [ -r /etc/os-release ]; then
   esac
 fi
 echo "Distribution : ${PRETTY_NAME:-inconnue} (famille $family)."
+
+# --- Processeur et petite machine ------------------------------------------------------
+# Les roues Python (ONNX Runtime, OpenCV) n’existent qu’en 64 bits : x86-64 ou ARM64.
+case "$(uname -m)" in
+  x86_64 | amd64) arch=x64 ;;
+  aarch64 | arm64) arch=arm64 ;;
+  *) die "processeur $(uname -m) non pris en charge : Cornelius demande un système 64 bits (x86-64 ou ARM64). Sur Raspberry Pi, installez Raspberry Pi OS 64 bits." ;;
+esac
+board="$(board_model)"
+echo "Processeur : $(uname -m)${board:+ ($board)}."
+small=0
+if small_machine; then
+  small=1
+  echo "Petite machine : sans vision locale ni génération d’images locale (OpenAI reste proposé)."
+fi
 
 if [ "$system_deps" = 1 ]; then
   step "Paquets du système"
@@ -130,8 +148,11 @@ fi
 # --- Accélération de la vision locale (ONNX Runtime) -----------------------------------
 step "Vision locale : moteur ONNX"
 has_nvidia() { command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi -L >/dev/null 2>&1; }
+if [ "$arch" = arm64 ] && [ "$gpu" != auto ] && [ "$gpu" != cpu ]; then
+  die "--gpu $gpu n’est pas proposé en ARM64 : la vision locale y tourne sur le processeur."
+fi
 if [ "$gpu" = auto ]; then
-  if has_nvidia; then gpu=nvidia; else gpu=cpu; fi
+  if [ "$arch" = x64 ] && has_nvidia; then gpu=nvidia; else gpu=cpu; fi
 fi
 case "$gpu" in
   nvidia)
@@ -146,12 +167,20 @@ gardez --gpu cpu pour la vision et utilisez ROCm pour la génération d’images
     .venv/bin/python -m pip install --disable-pip-version-check onnxruntime-migraphx \
       -f "https://repo.radeon.com/rocm/manylinux/rocm-rel-$ROCM_RELEASE/"
     ;;
-  cpu) echo "Vision sur le CPU (graphes q4)." ;;
+  cpu)
+    if [ "$small" = 1 ]; then echo "Vision locale désactivée sur cette machine."
+    else echo "Vision sur le CPU (graphes q4)."; fi
+    ;;
 esac
 
 if [ "$models" = 1 ]; then
   step "Modèles locaux (vérifiés par SHA-256)"
-  .venv/bin/python perception/download_models.py --device auto
+  if [ "$small" = 1 ]; then
+    # Visages, parole et mot d’appel seulement : le modèle de vision ne servirait pas.
+    .venv/bin/python perception/download_models.py --no-vision
+  else
+    .venv/bin/python perception/download_models.py --device auto
+  fi
 fi
 
 if [ "$wake" = 1 ]; then

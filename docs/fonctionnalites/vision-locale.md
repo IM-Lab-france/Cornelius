@@ -10,6 +10,8 @@ Cette description est calculée sur l’ordinateur du miroir par un modèle d’
 
 La vision est réglée pour tout le foyer : le modèle et le moment où Cornelius regarde valent pour tous les profils.
 
+Sur un Raspberry Pi, la vision locale n’est pas proposée : le module **Vision** n’apparaît pas dans l’administration et la reconnaissance des personnes continue seule. Voir [Installer sur Raspberry Pi](../installation/raspberry-pi.md).
+
 ## Quand Cornelius regarde
 
 Le réglage **Modules → Vision → Quand regarder** propose trois choix :

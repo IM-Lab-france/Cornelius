@@ -1,5 +1,7 @@
 import { resolve } from 'node:path';
+import type { MachineStatus } from '../shared/types.js';
 import { externalAddonsRoot } from './addons/registry.js';
+import { detectMachine } from './machine.js';
 
 export interface AppConfig {
   databasePath: string;
@@ -31,6 +33,8 @@ export interface AppConfig {
   tlsFingerprint?: string;
   /** Empreinte de la clé publique : celle que vérifient les satellites audio. */
   tlsKeyFingerprint?: string;
+  /** Machine détectée ; absente (tests), elle compte comme un PC sans restriction. */
+  machine?: MachineStatus;
 }
 
 /** Mot de passe écrit par `npm run setup` et `.env.example`, à changer après l’installation. */
@@ -76,6 +80,7 @@ export function loadConfig(): AppConfig & { port: number } {
     primApiKey: process.env.CORNELIUS_PRIM_API_KEY || undefined,
     modulesDir: externalAddonsRoot(),
     timeZone: process.env.CORNELIUS_TIMEZONE?.trim() || undefined,
+    machine: detectMachine(),
     adminPassword,
     databasePath:
       process.env.CORNELIUS_DATABASE === ':memory:'

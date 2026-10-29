@@ -28,7 +28,8 @@ Ne publiez jamais ce fichier : il contient le mot de passe et les clés. Il est 
 
 | Variable | Défaut | Effet | Lue par |
 |---|---|---|---|
-| `OPENAI_API_KEY` | vide | Clé de l’API OpenAI, valeur de secours : une clé saisie dans **Mise en route → Clés et jetons** passe avant. Sans clé, aucune conversation ne s’ouvre et la mémoire ne retient rien. La rubrique **Mise en route** affiche alors l’étape **Clé OpenAI** à faire. | serveur |
+| `OPENAI_API_KEY` | vide | Clé de l’API OpenAI, valeur de secours : une clé saisie dans **Mise en route → Clés et jetons** passe avant. Sans clé, aucune conversation ne s’ouvre et la mémoire ne retient rien. La rubrique **Mise en route** affiche alors l’étape **Clé OpenAI** à faire. Sert aussi aux images « Avec OpenAI ». | serveur |
+| `MISTRAL_API_KEY` | vide | Clé de l’API Mistral, avec l’accès Voice Agents, valeur de secours comme la clé OpenAI. Utilisée seulement quand **Mise en route → Voix de Cornelius → Fournisseur de la conversation** vaut « Mistral · Voxtral 3 » : conversation et mémoire. Voir [Le fournisseur vocal](../fonctionnalites/fournisseur-vocal.md). | serveur |
 | `CORNELIUS_ADMIN_PASSWORD` | `cornelius` (écrit par `npm run setup`) | Mot de passe de départ de l’administration, 4 caractères au moins. Un mot de passe choisi dans **Mise en route** le remplace (seule son empreinte est gardée en base). Le serveur refuse de démarrer sans lui. Tant qu’il vaut `cornelius`, la **Mise en route** demande de le changer. | serveur |
 | `CORNELIUS_LOGIN_RATE_LIMIT` | `10` | Nombre de tentatives de connexion à l’administration permises par minute. Entier de 1 ou plus. | serveur |
 
@@ -70,6 +71,7 @@ Les valeurs de `.env` ne sont jamais copiées dans la base ; un jeton saisi dans
 | Variable | Défaut | Effet | Lue par |
 |---|---|---|---|
 | `CORNELIUS_CAMERA_INDEX` | `0` | Numéro de la caméra (au sens d’OpenCV) ouverte par la perception au démarrage. | perception |
+| `CORNELIUS_SMALL_MACHINE` | détection automatique | `1`, `true`, `oui` ou `yes` : petite machine, comme un Raspberry Pi (vision locale et générateur d’images local retirés, visages cherchés sur une image de 640 pixels de large). `0`, `false`, `non` ou `no` : jamais. Sans valeur, un Raspberry Pi est reconnu par le nom de sa carte. Voir [Installer sur Raspberry Pi](../installation/raspberry-pi.md). | serveur, `scripts/install-linux.sh` |
 | `CORNELIUS_VISION_MODEL` | `450m` | Modèle de vision chargé au démarrage : `450m`, `1.6b` ou `3b`. Une autre valeur revient à `450m`. | perception, `perception/download_models.py` |
 | `CORNELIUS_VISION_DEVICE` | `auto` | Calcul de la vision au démarrage : `auto` (carte graphique si disponible), `gpu` ou `cpu`. | perception, `perception/download_models.py` |
 | `CORNELIUS_VISION_PROVIDER` | choix automatique | Moteur ONNX imposé : `CUDAExecutionProvider`, `MIGraphXExecutionProvider`, `ROCMExecutionProvider` (anciennes versions d’ONNX Runtime), `DmlExecutionProvider` ou `CPUExecutionProvider`. | perception, `perception/download_models.py` |

@@ -420,6 +420,23 @@ body {
   background: #4ade80;
   opacity: 1;
 }
+/* Arrivée et départ en fondu ; le départ suit la transition d’opacité (PERSON_FADE_MS). */
+.mirror-person {
+  animation: mirror-person-in 0.6s ease;
+}
+.mirror-person.is-leaving {
+  opacity: 0;
+  transform: translateY(calc(4 * var(--mirror-scale)));
+  transition:
+    opacity 0.6s ease,
+    transform 0.6s ease;
+}
+@keyframes mirror-person-in {
+  from {
+    opacity: 0;
+    transform: translateY(calc(4 * var(--mirror-scale)));
+  }
+}
 
 /*
  * Ce que fait Cornelius pendant la conversation, en une ligne sous l’orbe visible et sous le

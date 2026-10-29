@@ -26,7 +26,7 @@ Ne sont pas retenus : les suppositions, les secrets et mots de passe, les questi
 
 Demander à voix haute d’ajouter, de corriger ou d’oublier quelque chose est seulement une proposition, traitée après la conversation. Cornelius ne confirme pas un changement avant qu’il soit appliqué. Pour un oubli immédiat, passez par l’administration.
 
-Bloquer OpenAI, ou arrêter Cornelius, annule les extractions en cours.
+Bloquer les services IA, ou arrêter Cornelius, annule les extractions en cours.
 
 ## Comment Cornelius s’en sert
 

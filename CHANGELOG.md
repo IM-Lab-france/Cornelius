@@ -6,6 +6,35 @@ Le fonctionnement actuel est décrit dans la [documentation](docs/README.md). Ce
 
 ## Non publié
 
+### 2026-10-29 : ARM64 et Raspberry Pi
+
+**Ajouté**
+
+- Installation sous Linux en ARM64 : `scripts/install-linux.sh` vérifie le processeur (x86-64 ou ARM64, 32 bits refusé) et n’accepte que `--gpu auto` ou `cpu` en ARM64.
+- Mode petite machine, reconnu seul sur un Raspberry Pi (nom de la carte dans le device tree) ou imposé par `CORNELIUS_SMALL_MACHINE` : vision locale retirée (module **Vision** masqué), générateur d’images local retiré (seul OpenAI reste ; des images jusque-là locales restent désactivées tant que l’administration ne les réactive pas), visages cherchés sur une image de 640 pixels de large puis reconnus sur l’image entière. Les réglages enregistrés sont gardés.
+- L’installateur ne télécharge pas le modèle de vision sur une petite machine (`perception/download_models.py --no-vision`).
+- Page [Installer sur Raspberry Pi](docs/installation/raspberry-pi.md).
+
+### 2026-10-28 : fin au regard malgré la parole
+
+**Modifié**
+
+- Avec l’ouverture au regard, parler en détournant les yeux ou de loin, souvent à quelqu’un d’autre, ne garde plus la conversation ouverte : elle se ferme après « Terminer après la perte du regard ». Seule une réponse de Cornelius en cours repousse encore cette fin.
+
+### 2026-10-27 : Mistral comme fournisseur vocal
+
+**Ajouté**
+
+- Fournisseur de la conversation au choix, dans **Mise en route → Voix de Cornelius** : « OpenAI · GPT Live » (par défaut) ou « Mistral · Voxtral 3 » (contribution de thibautrey, #4). Avec Mistral, Voxtral écoute et parle, Mistral Small répond, appelle les outils de Cornelius et extrait les souvenirs.
+- Clé `MISTRAL_API_KEY`, dans « Clés et jetons » ou `.env`. Le changement de fournisseur exige sa clé et une conversation terminée.
+- Avec Mistral, facturé à la minute : fermeture après 20 secondes sans activité, 15 minutes au plus, session supprimée chez Mistral à chaque fermeture.
+
+**Modifié**
+
+- « Bloquer OpenAI » devient « Bloquer les services IA » et coupe les deux fournisseurs.
+- La carte « Voix de Cornelius » passe de la personnalité à « Mise en route ».
+- Documentation : page [Le fournisseur vocal](docs/fonctionnalites/fournisseur-vocal.md), confidentialité, administration et configuration à jour.
+
 ### 2026-10-23 : réglages du micro
 
 **Ajouté**
