@@ -38,7 +38,11 @@ import { adminPasswordMigration } from './admin-password.js';
 import { secretsMigration } from './secrets.js';
 import { mailMigration, mailRecipientsMigration } from './mail-store.js';
 import { trustedDevicesMigration } from './trusted-devices.js';
-import { satellitesMigration, satelliteLightingMigration } from './satellites-store.js';
+import {
+  satellitesMigration,
+  satelliteLightingMigration,
+  satelliteRoomMigration,
+} from './satellites-store.js';
 import {
   screensaverChoicesMigration,
   screensaverDurationMigration,
@@ -408,6 +412,7 @@ export const migrations: readonly string[] = [
     provider TEXT NOT NULL DEFAULT 'openai' CHECK (provider IN ('openai', 'mistral'))
   ) STRICT;
   INSERT OR IGNORE INTO voice_provider_preferences (id) VALUES (1);`,
+  satelliteRoomMigration,
 ];
 
 /** The server owns this connection. Backups include WAL changes via SQLite itself. */

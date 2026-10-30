@@ -1,6 +1,11 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
-import type { SatelliteSettings, SatelliteLighting } from '../shared/satellites.js';
+import type { SatelliteSettings, SatelliteLighting, SatelliteRoom } from '../shared/satellites.js';
+
+export const satelliteRoomMigration = `CREATE TABLE IF NOT EXISTS satellite_room (
+  satellite_id TEXT PRIMARY KEY REFERENCES satellites(id) ON DELETE CASCADE,
+  config TEXT NOT NULL CHECK(json_valid(config))
+) STRICT;`;
 
 export const satelliteLightingMigration = `CREATE TABLE IF NOT EXISTS satellite_lighting (
   satellite_id TEXT PRIMARY KEY REFERENCES satellites(id) ON DELETE CASCADE,
@@ -34,6 +39,7 @@ export interface Satellite extends SatelliteSettings {
   /** Profil rattaché (mémoire personnelle) ; null : satellite anonyme, le cas par défaut. */
   profileId: string | null;
   lighting?: SatelliteLighting;
+  room?: SatelliteRoom;
   createdAt: number;
   lastSeenAt: number | null;
 }
@@ -42,6 +48,7 @@ export type SatelliteChanges = Partial<SatelliteSettings> & {
   name?: string;
   profileId?: string | null;
   lighting?: SatelliteLighting;
+  room?: SatelliteRoom;
 };
 
 const tokenHash = (token: string) => createHash('sha256').update(token).digest('hex');
@@ -80,7 +87,14 @@ export class SatelliteStore {
     const row = this.db
       .prepare('SELECT config FROM satellite_lighting WHERE satellite_id = ?')
       .get(value.id);
-    return row ? { ...value, lighting: JSON.parse(String(row.config)) } : value;
+    const room = this.db
+      .prepare('SELECT config FROM satellite_room WHERE satellite_id = ?')
+      .get(value.id);
+    return {
+      ...value,
+      ...(row ? { lighting: JSON.parse(String(row.config)) } : {}),
+      ...(room ? { room: JSON.parse(String(room.config)) } : {}),
+    };
   }
   /** Le jeton n’est rendu qu’ici : il faut le noter tout de suite dans le satellite. */
   create(name: string): { satellite: Satellite; token: string } {
@@ -123,6 +137,12 @@ export class SatelliteStore {
           'INSERT INTO satellite_lighting(satellite_id, config) VALUES (?, ?) ON CONFLICT(satellite_id) DO UPDATE SET config=excluded.config',
         )
         .run(id, JSON.stringify(changes.lighting));
+    if (changes.room !== undefined)
+      this.db
+        .prepare(
+          'INSERT INTO satellite_room(satellite_id, config) VALUES (?, ?) ON CONFLICT(satellite_id) DO UPDATE SET config=excluded.config',
+        )
+        .run(id, JSON.stringify(changes.room));
     return this.get(id);
   }
   remove(id: string): boolean {

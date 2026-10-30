@@ -1,6 +1,6 @@
 /** Appareils que Luna peut allumer ou éteindre. */
 export const HOME_ASSISTANT_CONTROL_DOMAINS = ['light', 'switch'] as const;
-/** Entités lues seulement : capteurs, minuteries, thermostats, volets, serrures… */
+/** Entités lisibles ; les volets/stores disposent aussi de commandes dédiées. */
 export const HOME_ASSISTANT_SENSOR_DOMAINS = [
   'sensor',
   'binary_sensor',
@@ -63,6 +63,7 @@ export interface HomeAssistantCommand {
 export interface LightingCatalog {
   areasAvailable: boolean;
   areas: { id: string; name: string }[];
+  entities?: (HomeAssistantEntity & { areaId: string | null; authorized: boolean })[];
   lights: {
     id: string;
     name: string;
@@ -70,4 +71,12 @@ export interface LightingCatalog {
     areaId: string | null;
     authorized: boolean;
   }[];
+}
+
+/** Volets et stores seulement : exclut portes, garages, portails et fenêtres. */
+export function isRoomCover(entity: Pick<HomeAssistantEntity, 'domain' | 'deviceClass'>): boolean {
+  return (
+    entity.domain === 'cover' &&
+    ['shutter', 'blind', 'shade', 'curtain'].includes(entity.deviceClass ?? '')
+  );
 }

@@ -114,15 +114,27 @@ Dans **Satellites audio**, **Décrire la scène** teste l’analyse sans convers
 
 ## Éclairage propre à chaque satellite
 
-Dans **Satellites audio**, ouvrez **Éclairage de cette pièce** sur la fiche du satellite.
+Dans **Satellites audio**, ouvrez **Contexte de la pièce** sur la fiche du satellite.
 
 1. Cochez une ou plusieurs **Lampes par défaut** : elles répondent à « allume la lumière » ou « éteins les lampes » sans précision.
 2. Pour **toutes les lampes**, choisissez une **pièce Home Assistant**. À chaque demande explicite de toutes les lampes, Cornelius relit ses registres et utilise uniquement les entités du domaine `light` autorisées dans cette pièce. Une affectation de pièce propre à l’entité prime sur celle de son appareil.
 3. Les lampes exposées comme prises/interrupteurs (`switch`) s’ajoutent dans **Autres lampes pour toutes les lampes**. Ce groupe manuel peut aussi remplacer la pièce HA. Les lampes par défaut sont toujours incluses. N’y ajoutez pas l’alimentation d’une imprimante ou d’un autre appareil.
-4. Cliquez **Enregistrer l’éclairage de…**. Une conversation en cours est refermée pour reprendre avec le nouveau contexte.
+4. Cliquez **Enregistrer le contexte de…**. Une conversation en cours est refermée pour reprendre avec le nouveau contexte.
 
 Sans pièce précisée, la pièce du satellite actif est utilisée, même si plusieurs satellites partagent le même profil Cédric. Une pièce explicitement nommée reste prioritaire ; « toutes les lampes de la cuisine » peut aussi viser une pièce HA sans satellite. Sans groupe par défaut défini, Cornelius demande de préciser une lampe : il ne doit pas choisir le salon par défaut depuis le bureau.
 
 Seuls les appareils sélectionnés et autorisés dans le module Home Assistant sont proposés et commandés. Choisir une pièce n’élargit pas ces autorisations. Les interrupteurs ne sont jamais traités automatiquement comme des lampes : cochez ceux qui commandent un éclairage. Si les registres de pièces sont indisponibles, les groupes entièrement manuels restent utilisables. Une pièce HA configurée mais devenue indisponible bloque la commande « toutes » au lieu de produire une liste incomplète.
 
 Le serveur résout la liste des entités, supprime les doublons et appelle les commandes individuelles existantes ; aucune commande globale à toute la maison n’est envoyée. Un résultat partiel ou non confirmé est signalé sans réessai automatique. Ce réglage concerne l’allumage/extinction ; pour une commande particulière ou un autre appareil, précisez son nom.
+
+## Température, humidité et volets de la pièce
+
+La même fiche permet d’ajouter une description courte (usage, étage, emplacement), un capteur de température, un capteur d’humidité et un volet/store par défaut. La description apporte du contexte ; elle ne change ni le profil de conversation ni les autorisations.
+
+Choisissez la pièce Home Assistant commune à l’éclairage et aux équipements. Sans équipement par défaut, Cornelius utilise l’unique entité autorisée du type attendu dans cette pièce. Avec plusieurs capteurs ou volets correspondants, il demande de préciser. Un choix manuel permet de corriger une affectation Home Assistant ou d’utiliser un équipement sans pièce ; il reste utilisable si les registres de pièces deviennent indisponibles. Changer de pièce dans le formulaire efface les trois choix manuels pour éviter de garder ceux de l’ancienne pièce.
+
+Exemples : « Quelle température fait-il ici ? », « Quel est le taux d’humidité ? », « Le volet est-il fermé ? », « Ouvre le volet », « Ferme le volet » et « Arrête le volet ». Une autre pièce explicitement nommée est prioritaire, même sans satellite. Une demande sans pièce utilise exclusivement celle du satellite actif, sans préférence issue du profil personnel.
+
+Les mesures proviennent de capteurs `sensor` de classe `temperature` ou `humidity`. Elles sont relues dans Home Assistant à chaque demande, sans utiliser un ancien état comme preuve. Les volets et stores de classe `shutter`, `blind`, `shade` ou `curtain` peuvent être ouverts, fermés ou arrêtés si l’appareil annonce la capacité correspondante. Portes, garages, portails et fenêtres restent exclus de ces commandes. Le réglage de position en pourcentage n’est pas inclus.
+
+Seules les entités déjà autorisées dans le module Home Assistant sont utilisables. Un équipement manuel devenu non autorisé bloque la demande, sans repli automatique. Une commande acceptée n’est annoncée comme terminée que si son état final est confirmé ; un mouvement encore en cours reste non confirmé et n’est pas relancé automatiquement. Aucun changement de firmware satellite n’est nécessaire.

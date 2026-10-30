@@ -349,3 +349,37 @@ test('le délai de silence du mode voix rejoint « Fin de parole » et quitte le
   assert.deepEqual(migrate(3, 12000, 0), [20000, null], 'mode caméra : délai par défaut gardé');
   assert.deepEqual(migrate(4, 12000, 1), [20000, null], 'réglage déjà choisi : gardé');
 });
+
+test('migration du contexte de pièce : conserve les satellites et leur éclairage', (t) => {
+  const db = new DatabaseSync(':memory:');
+  t.after(() => db.close());
+  const index = before('IF NOT EXISTS satellite_room');
+  for (const sql of migrations.slice(0, index)) db.exec(sql);
+  db.prepare('INSERT INTO satellites(id, name, token_hash, created_at) VALUES (?, ?, ?, ?)').run(
+    'bureau',
+    'Bureau',
+    'hash',
+    1,
+  );
+  const lighting = JSON.stringify({
+    areaId: 'office',
+    defaultEntityIds: ['light.bureau'],
+    allEntityIds: [],
+  });
+  db.prepare('INSERT INTO satellite_lighting(satellite_id, config) VALUES (?, ?)').run(
+    'bureau',
+    lighting,
+  );
+  for (const sql of migrations.slice(index)) db.exec(sql);
+  db.exec(migrations[index]!);
+  assert.equal(
+    db.prepare('SELECT name FROM satellites WHERE id = ?').get('bureau')!.name,
+    'Bureau',
+  );
+  assert.equal(
+    db.prepare('SELECT config FROM satellite_lighting WHERE satellite_id = ?').get('bureau')!
+      .config,
+    lighting,
+  );
+  assert.equal(db.prepare('SELECT count(*) AS n FROM satellite_room').get()!.n, 0);
+});

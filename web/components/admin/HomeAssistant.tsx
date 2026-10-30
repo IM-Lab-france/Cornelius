@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { CircleAlert, House, RefreshCw } from 'lucide-react';
 import {
   isControllable,
+  isRoomCover,
   type HomeAssistantEntity,
   type HomeAssistantView,
 } from '../../../shared/home-assistant';
@@ -267,9 +268,9 @@ export function HomeAssistantSettings({
               <div className="space-y-1">
                 <Label htmlFor="ha-enabled">Autoriser Cornelius à utiliser la sélection</Label>
                 <p className="text-xs text-muted-foreground">
-                  Cornelius allume ou éteint les lumières et prises cochées, et lit les capteurs
-                  cochés (« quelle température dans la chambre ? »). Les capteurs ne sont jamais
-                  commandés.
+                  Cornelius commande les lumières, prises et volets/stores cochés, et lit les
+                  capteurs cochés (« quelle température dans la chambre ? »). Les capteurs ne sont
+                  jamais commandés.
                 </p>
               </div>
               <Switch
@@ -408,11 +409,13 @@ export function HomeAssistantSettings({
                     )}
                     <span className="block text-xs wrap-anywhere text-muted-foreground">
                       {entity.id} ·{' '}
-                      {!isControllable(entity)
-                        ? 'Lecture seule'
-                        : entity.brightness
-                          ? 'Luminosité réglable'
-                          : 'Marche / arrêt'}
+                      {isRoomCover(entity)
+                        ? 'Volet/store : lecture, ouverture, fermeture et arrêt'
+                        : !isControllable(entity)
+                          ? 'Lecture seule'
+                          : entity.brightness
+                            ? 'Luminosité réglable'
+                            : 'Marche / arrêt'}
                     </span>
                   </span>
                 </label>

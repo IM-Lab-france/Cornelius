@@ -73,7 +73,15 @@ export async function fakeHomeAssistant() {
       const entity = states.get(String(body.entity_id));
       if (options.apply && entity && options.serviceStatus === 200) {
         const apply = () => {
-          entity.state = path.endsWith('/turn_on') ? 'on' : 'off';
+          entity.state = path.endsWith('/open_cover')
+            ? 'open'
+            : path.endsWith('/close_cover')
+              ? 'closed'
+              : path.endsWith('/stop_cover')
+                ? 'open'
+                : path.endsWith('/turn_on')
+                  ? 'on'
+                  : 'off';
           entity.last_updated = new Date().toISOString();
           if (typeof body.brightness_pct === 'number')
             entity.attributes.brightness = Math.round((body.brightness_pct / 100) * 255);

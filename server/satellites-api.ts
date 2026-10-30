@@ -1,3 +1,4 @@
+import { matchesRoomKind } from './satellite-room.js';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { compile } from '../shared/validation.js';
 import type { ProfileRepository } from './storage.js';
@@ -31,6 +32,36 @@ const updateSchema = compile<SatelliteChanges>({
     ledBrightness: { type: 'integer', minimum: 0, maximum: 10 },
     nightLight: { type: 'boolean' },
     attentive: { type: 'boolean' },
+    room: {
+      type: 'object',
+      additionalProperties: false,
+      required: [
+        'areaId',
+        'description',
+        'temperatureEntityId',
+        'humidityEntityId',
+        'coverEntityId',
+      ],
+      properties: {
+        areaId: { type: ['string', 'null'], minLength: 1, maxLength: 255 },
+        description: { type: 'string', maxLength: 500 },
+        temperatureEntityId: {
+          type: ['string', 'null'],
+          pattern: '^sensor\\.[a-z0-9_]+$',
+          maxLength: 255,
+        },
+        humidityEntityId: {
+          type: ['string', 'null'],
+          pattern: '^sensor\\.[a-z0-9_]+$',
+          maxLength: 255,
+        },
+        coverEntityId: {
+          type: ['string', 'null'],
+          pattern: '^cover\\.[a-z0-9_]+$',
+          maxLength: 255,
+        },
+      },
+    },
     lighting: {
       type: 'object',
       additionalProperties: false,
@@ -179,6 +210,30 @@ export function registerSatellites(
       if (!updateSchema(body)) return reply.code(400).send({ error: 'Réglages invalides.' });
       if (body.profileId && !profiles.get(body.profileId))
         return reply.code(400).send({ error: 'Profil introuvable.' });
+      if (body.room) {
+        const catalog = await services.lightingCatalog?.();
+        if (body.room.areaId && !catalog?.areas.some((a) => a.id === body.room!.areaId))
+          return reply
+            .code(400)
+            .send({ error: 'Pièce Home Assistant indisponible : actualisez la liste.' });
+        for (const kind of ['temperature', 'humidity', 'cover'] as const) {
+          const id =
+            body.room[
+              kind === 'temperature'
+                ? 'temperatureEntityId'
+                : kind === 'humidity'
+                  ? 'humidityEntityId'
+                  : 'coverEntityId'
+            ];
+          if (
+            id &&
+            !catalog?.entities?.some((e) => e.id === id && e.authorized && matchesRoomKind(e, kind))
+          )
+            return reply.code(400).send({
+              error: 'Choisissez un équipement autorisé du type attendu dans Home Assistant.',
+            });
+        }
+      }
       if (body.lighting) {
         const catalog = await services.lightingCatalog?.();
         const allowed = new Set(catalog?.lights.filter((e) => e.authorized).map((e) => e.id));
@@ -187,19 +242,15 @@ export function registerSatellites(
             (id) => !allowed.has(id),
           )
         )
-          return reply
-            .code(400)
-            .send({
-              error:
-                'Choisissez uniquement des lampes ou interrupteurs autorisés dans Home Assistant.',
-            });
+          return reply.code(400).send({
+            error:
+              'Choisissez uniquement des lampes ou interrupteurs autorisés dans Home Assistant.',
+          });
         if (body.lighting.areaId && !catalog?.areas.some((a) => a.id === body.lighting!.areaId))
-          return reply
-            .code(400)
-            .send({
-              error:
-                'Pièce Home Assistant indisponible : actualisez la liste ou utilisez un groupe manuel.',
-            });
+          return reply.code(400).send({
+            error:
+              'Pièce Home Assistant indisponible : actualisez la liste ou utilisez un groupe manuel.',
+          });
       }
       const satellite = store.update(request.params.id, {
         ...body,
@@ -207,7 +258,7 @@ export function registerSatellites(
       });
       if (!satellite) return reply.code(404).send({ error: 'Satellite introuvable.' });
       hub.refresh(satellite);
-      if (body.lighting) services.lightingChanged?.();
+      if (body.lighting || body.room || body.name !== undefined) services.lightingChanged?.();
       return { satellite: view(satellite) };
     },
   );

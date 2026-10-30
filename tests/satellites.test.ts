@@ -433,4 +433,33 @@ test('éclairage satellite : accès administrateur, validation et persistance is
   assert.equal((await write(empty)).statusCode, 200);
   const read = await f.app.inject({ url: '/api/admin/satellites', headers: { cookie } });
   assert.deepEqual(read.json().satellites.find((s: { id: string }) => s.id === id).lighting, empty);
+  const room = {
+    areaId: null,
+    description: 'Bureau à l’étage',
+    temperatureEntityId: null,
+    humidityEntityId: null,
+    coverEntityId: null,
+  };
+  const writeRoom = (value: unknown) =>
+    f.app.inject({
+      method: 'PATCH',
+      url: '/api/admin/satellites/' + id,
+      headers: { origin, cookie },
+      payload: { room: value },
+    });
+  for (const invalid of [
+    { ...room, temperatureEntityId: 'sensor.unknown' },
+    { ...room, humidityEntityId: 'switch.lamp' },
+    { ...room, coverEntityId: 'cover.unknown' },
+    { ...room, description: 'x'.repeat(501) },
+    { ...room, areaId: 'unknown' },
+    { ...room, injected: true },
+  ])
+    assert.equal((await writeRoom(invalid)).statusCode, 400);
+  assert.equal((await writeRoom(room)).statusCode, 200);
+  const saved = (await f.app.inject({ url: '/api/admin/satellites', headers: { cookie } }))
+    .json()
+    .satellites.find((s: { id: string }) => s.id === id);
+  assert.deepEqual(saved.room, room);
+  assert.deepEqual(saved.lighting, empty);
 });

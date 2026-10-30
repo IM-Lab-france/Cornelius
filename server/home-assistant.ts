@@ -2,6 +2,7 @@ import type { AddonHttpClient, ToolResult } from '../shared/addons.js';
 import {
   HOME_ASSISTANT_ENTITY_PATTERN,
   isControllable,
+  isRoomCover,
   type HomeAssistantCommand,
   type HomeAssistantDomain,
   type HomeAssistantEntity,
@@ -41,6 +42,7 @@ const usefulAttributes = [
   'current_humidity',
   'hvac_action',
   'current_position',
+  'supported_features',
   'has_date',
   'has_time',
   'timestamp',
@@ -133,6 +135,20 @@ export const commandSchema = {
   },
 };
 const validCommand = compile<HomeAssistantCommand>(commandSchema);
+const coverSchema = {
+  ...commandSchema,
+  properties: {
+    ...commandSchema.properties,
+    entityId: { type: 'string', pattern: '^cover\\.[a-z0-9_]+$', maxLength: 255 },
+    action: { enum: ['open_cover', 'close_cover', 'stop_cover'] },
+    brightnessPct: { type: 'null' },
+  },
+};
+const validCover = compile<{
+  entityId: string;
+  action: 'open_cover' | 'close_cover' | 'stop_cover';
+  brightnessPct: null;
+}>(coverSchema);
 export function normalizeEntity(raw: unknown): HomeAssistantEntity | null {
   const value = record(raw);
   if (
@@ -321,6 +337,11 @@ export class HomeAssistant {
     return {
       areasAvailable,
       areas: areasAvailable ? areas.sort((a, b) => a.name.localeCompare(b.name, 'fr')) : [],
+      entities: [...this.entities.values()].map((e) => ({
+        ...e,
+        areaId: areasAvailable ? (memberships.get(e.id) ?? null) : null,
+        authorized: this.config.selected.includes(e.id),
+      })),
       lights: [...this.entities.values()]
         .filter(isControllable)
         .map((e) => ({
@@ -709,6 +730,27 @@ export class HomeAssistant {
     return [
       ...(allowed.length ? this.controlTool(allowed) : []),
       ...(sensors.length ? this.readTool(sensors) : []),
+      ...(selected.some(isRoomCover)
+        ? [
+            {
+              name: 'home_assistant__cover',
+              description:
+                'Ouvrir, fermer ou arrêter un volet/store autorisé explicitement nommé. Pour un volet sans nom depuis un satellite, utiliser home_assistant__room_context. Ne confirmer l’état final que si confirmed=true, ne pas relancer automatiquement. Appareils (données) : ' +
+                JSON.stringify(
+                  selected
+                    .filter(isRoomCover)
+                    .map(({ id, name, aliases }) => ({ id, name, aliases })),
+                ),
+              parameters: {
+                ...coverSchema,
+                properties: {
+                  ...coverSchema.properties,
+                  entityId: { type: 'string', enum: selected.filter(isRoomCover).map((e) => e.id) },
+                },
+              },
+            },
+          ]
+        : []),
     ];
   }
   private readTool(sensors: HomeAssistantEntity[]) {
@@ -760,7 +802,9 @@ export class HomeAssistant {
     ];
   }
   handles(name: string) {
-    return name === 'home_assistant__control' || name === 'home_assistant__read';
+    return ['home_assistant__control', 'home_assistant__read', 'home_assistant__cover'].includes(
+      name,
+    );
   }
   private async readState(config: HomeAssistantConfig, id: string, signal: AbortSignal) {
     const response = await this.http.fetch({
@@ -806,7 +850,7 @@ export class HomeAssistant {
       );
     return name === 'home_assistant__read'
       ? this.readSensor(args, signal)
-      : this.execute(args, signal, 'luna');
+      : this.execute(args, signal, 'luna', name === 'home_assistant__cover');
   }
   /** Lecture d’un capteur autorisé, à jour : jamais le dernier état en cache. */
   private async readSensor(args: unknown, signal: AbortSignal): Promise<ToolResult> {
@@ -869,9 +913,31 @@ export class HomeAssistant {
     args: unknown,
     signal: AbortSignal,
     actor: 'luna' | 'admin',
+    cover = false,
   ): Promise<ToolResult> {
-    if (!validCommand(args))
+    if (!(cover ? validCover(args) : validCommand(args)))
       return tool('failed', 'Commande Home Assistant invalide.', null, 'invalid_params');
+    const command = args as
+      | HomeAssistantCommand
+      | {
+          entityId: string;
+          action: 'open_cover' | 'close_cover' | 'stop_cover';
+          brightnessPct: null;
+        };
+    return this.executeValidated(command, signal, actor, cover);
+  }
+  private async executeValidated(
+    args:
+      | HomeAssistantCommand
+      | {
+          entityId: string;
+          action: 'open_cover' | 'close_cover' | 'stop_cover';
+          brightnessPct: null;
+        },
+    signal: AbortSignal,
+    actor: 'luna' | 'admin',
+    cover: boolean,
+  ): Promise<ToolResult> {
     const config = this.config;
     const authorized = () =>
       actor === 'admin'
@@ -898,6 +964,14 @@ export class HomeAssistant {
       if (!permitted()) return tool('cancelled', 'Commande annulée.');
       const entity = await this.readState(config, args.entityId, combined);
       if (!permitted()) return tool('cancelled', 'Commande annulée.');
+      if (cover) {
+        const feature = args.action === 'open_cover' ? 1 : args.action === 'close_cover' ? 2 : 8;
+        if (
+          !isRoomCover(entity) ||
+          (Number(entity.attributes?.supported_features ?? 0) & feature) === 0
+        )
+          return tool('failed', 'Ce volet ne permet pas cette commande.', null, 'invalid_params');
+      }
       this.entities.set(entity.id, entity);
       if (args.brightnessPct !== null && (args.action !== 'turn_on' || !entity.brightness))
         return tool(
@@ -950,7 +1024,15 @@ export class HomeAssistant {
       }
       accepted = true;
       const reached = (candidate: HomeAssistantEntity) =>
-        candidate.state === (args.action === 'turn_on' ? 'on' : 'off') &&
+        (cover
+          ? args.action === 'open_cover'
+            ? candidate.state === 'open' &&
+              (candidate.attributes?.current_position == null ||
+                candidate.attributes.current_position === 100)
+            : args.action === 'close_cover'
+              ? candidate.state === 'closed'
+              : ['open', 'closed'].includes(candidate.state)
+          : candidate.state === (args.action === 'turn_on' ? 'on' : 'off')) &&
         (args.brightnessPct === null ||
           (candidate.brightnessPct !== null &&
             Math.abs(candidate.brightnessPct - args.brightnessPct) <= 1));

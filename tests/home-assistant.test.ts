@@ -57,6 +57,60 @@ test('pièces : affectation entité prioritaire sur appareil et repli manuel san
   assert.equal(fallback.lights.find((e) => e.id === 'switch.bureau')?.authorized, true);
 });
 const signal = () => new AbortController().signal;
+
+test('volets : capacités, autorisations, confirmation et aucun nouvel essai automatique', async (t) => {
+  const f = await fixture(t);
+  const shutter = {
+    ...haState('cover.office', 'closed'),
+    attributes: {
+      ...haState('cover.office').attributes,
+      device_class: 'shutter',
+      supported_features: 11,
+    },
+  };
+  const garage = {
+    ...haState('cover.garage', 'closed'),
+    attributes: {
+      ...haState('cover.garage').attributes,
+      device_class: 'garage',
+      supported_features: 11,
+    },
+  };
+  f.fake.states.set(shutter.entity_id, shutter);
+  f.fake.states.set(garage.entity_id, garage);
+  await f.home.refresh();
+  f.select(['cover.office', 'cover.garage']);
+  const run = (id: string, action: string) =>
+    f.home.run(command(id, action), signal(), 'home_assistant__cover');
+  assert.ok(
+    JSON.stringify(f.home.tools().find((t) => t.name === 'home_assistant__cover')).includes(
+      'cover.office',
+    ),
+  );
+  assert.ok(
+    !JSON.stringify(f.home.tools().find((t) => t.name === 'home_assistant__cover')).includes(
+      'cover.garage',
+    ),
+  );
+  for (const action of ['open_cover', 'close_cover', 'stop_cover']) {
+    const result = await run('cover.office', action);
+    assert.equal(result.result?.confirmed, true);
+    assert.equal(f.fake.calls.at(-1)?.path, '/api/services/cover/' + action);
+    assert.deepEqual(f.fake.calls.at(-1)?.body, { entity_id: 'cover.office' });
+  }
+  const count = f.fake.calls.length;
+  assert.equal((await run('cover.garage', 'open_cover')).status, 'failed');
+  shutter.attributes.supported_features = 0;
+  assert.equal((await run('cover.office', 'open_cover')).status, 'failed');
+  assert.equal(f.fake.calls.length, count);
+  shutter.attributes.supported_features = 11;
+  f.fake.options.serviceStatus = 500;
+  assert.equal((await run('cover.office', 'open_cover')).status, 'unknown');
+  assert.equal(f.fake.calls.length, count + 1);
+  f.select([]);
+  assert.equal((await run('cover.office', 'open_cover')).status, 'failed');
+  assert.equal(f.fake.calls.length, count + 1);
+});
 async function until(predicate: () => boolean) {
   for (let i = 0; i < 100; i++) {
     if (predicate()) return;

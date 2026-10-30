@@ -1,3 +1,4 @@
+import { SatelliteRoomBridge } from './satellite-room.js';
 import type { HomeAssistant } from './home-assistant.js';
 import type { SatelliteStore } from './satellites-store.js';
 import type { SessionController } from './controller.js';
@@ -36,10 +37,21 @@ export class SatelliteLightingBridge {
     private home: Pick<HomeAssistant, 'tools' | 'lightingCatalog' | 'run'>,
     private controller: SessionController,
   ) {}
+  context() {
+    const source = this.controller.sessionState().satellite;
+    const satellite = source ? this.store.get(source.id) : null;
+    return satellite
+      ? { name: satellite.name, description: satellite.room?.description ?? '' }
+      : null;
+  }
+  runContext(args: unknown, signal: AbortSignal) {
+    return new SatelliteRoomBridge(this.store, this.home, this.controller).run(args, signal);
+  }
   tools(profileId: string | null) {
     const source = this.controller.sessionState().satellite;
     if (!source || !this.home.tools(profileId !== null).length) return [];
     return [
+      ...new SatelliteRoomBridge(this.store, this.home, this.controller).tools(profileId),
       {
         name: 'home_assistant__room_lights',
         description:
@@ -93,8 +105,12 @@ export class SatelliteLightingBridge {
           );
     if (matching.length > 1) return failure('Plusieurs pièces portent ce nom : précisez la pièce.');
     let target:
-      { name: string; lighting?: import('../shared/satellites.js').SatelliteLighting } | undefined =
-      matching[0];
+      | {
+          name: string;
+          lighting?: import('../shared/satellites.js').SatelliteLighting;
+          room?: import('../shared/satellites.js').SatelliteRoom;
+        }
+      | undefined = matching[0];
     if (!target?.lighting && args.room !== null) {
       const areas = catalog.areas.filter(
         (a) => a.id === args.room || normalize(a.name) === normalize(args.room!),
@@ -109,7 +125,10 @@ export class SatelliteLightingBridge {
       return failure(
         'Éclairage non configuré ou pièce ambiguë : configurez le satellite ou précisez une lampe.',
       );
-    const config = target.lighting;
+    const config = {
+      ...target.lighting,
+      areaId: target.room ? target.room.areaId : target.lighting.areaId,
+    };
     if (
       args.scope === 'all' &&
       config.areaId &&

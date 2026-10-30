@@ -7,7 +7,8 @@ Cornelius peut allumer et éteindre les lumières et les prises de la maison, et
 Home Assistant est un logiciel de domotique installé à part. Cornelius s’y connecte directement : aucun module complémentaire, blueprint ni intégration n’est à installer dans Home Assistant.
 
 - **Lumières et prises** (`light.*` et `switch.*`) : allumer, éteindre, lire l’état, et régler la luminosité des lumières qui le permettent (de 1 à 100 %).
-- **Capteurs**, en lecture seule : capteurs et détecteurs, minuteries, dates et heures, nombres, interrupteurs virtuels, listes de choix, compteurs, thermostats, volets et serrures. Un capteur n’est jamais commandé : Cornelius peut dire si une serrure est fermée, pas l’ouvrir.
+- **Capteurs**, en lecture seule : capteurs et détecteurs, minuteries, dates et heures, nombres, interrupteurs virtuels, listes de choix, compteurs, thermostats et serrures. Cornelius peut dire si une serrure est fermée, pas l’ouvrir.
+- **Volets et stores** : lecture, ouverture, fermeture et arrêt pour les classes `shutter`, `blind`, `shade` et `curtain`, selon les capacités annoncées par l’appareil. Les autres entités `cover`, notamment portes et garages, restent en lecture seule. Un volet coché et autorisé peut être commandé vocalement ; sa fiche le signale.
 
 Dans Home Assistant, un « switch » peut piloter autre chose qu’une prise. Ne cochez que les appareils que Cornelius doit vraiment commander.
 
@@ -117,7 +118,7 @@ Ce que ce compte limite : sans droits d’administrateur, le jeton ne donne pas 
 
 ## Limites
 
-- Ne sont pas pris en charge : la couleur des lumières, les scènes, la commande des volets, des serrures et des thermostats, et des droits différents selon la personne.
+- Ne sont pas pris en charge : la couleur des lumières, les scènes, la position des volets en pourcentage, la commande des serrures et des thermostats, et des droits différents selon la personne.
 - Une intégration Home Assistant qui dépend d’un service en ligne en dépend toujours.
 - Les commandes réelles peuvent varier selon la version de Home Assistant et l’intégration de chaque appareil. Essayez-les avec les boutons **Allumer** et **Éteindre** avant de les confier à Cornelius.
 

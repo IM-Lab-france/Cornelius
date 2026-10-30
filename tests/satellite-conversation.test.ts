@@ -407,13 +407,29 @@ test('transport satellite : outil de pièce exposé et appel transmis au résolv
   const profile = f.profiles.create('Cédric');
   store.update(sat.id, {
     lighting: { areaId: null, defaultEntityIds: ['switch.office_lamp'], allEntityIds: [] },
+    room: {
+      areaId: null,
+      description: 'Bureau à l’étage',
+      temperatureEntityId: 'sensor.office_temp',
+      humidityEntityId: null,
+      coverEntityId: null,
+    },
   });
   const commands: string[] = [];
   const home = {
-    tools: () => [{ name: 'home_assistant__control' }],
+    tools: () => [{ name: 'home_assistant__control' }, { name: 'home_assistant__read' }],
     lightingCatalog: async () => ({
       areasAvailable: false,
       areas: [],
+      entities: [
+        {
+          id: 'sensor.office_temp',
+          name: 'Température',
+          domain: 'sensor',
+          deviceClass: 'temperature',
+          authorized: true,
+        },
+      ],
       lights: [
         {
           id: 'switch.office_lamp',
@@ -460,4 +476,49 @@ test('transport satellite : outil de pièce exposé et appel transmis au résolv
       e.type === 'response.item.create' && 'item' in e && e.item.type === 'function_call_output',
   );
   assert.ok(output);
+  if (session.delegation?.type === 'responses') {
+    assert.match(session.delegation.responses.instructions!, /home_assistant__room_context/);
+    assert.ok(
+      session.delegation.responses.tools?.some(
+        (tool) => 'name' in tool && tool.name === 'home_assistant__room_context',
+      ),
+    );
+  }
+  f.emit({
+    type: 'response.event',
+    delegation_id: 'room',
+    event: {
+      type: 'response.output_item.done',
+      item: {
+        type: 'function_call',
+        call_id: 'temp-call',
+        name: 'home_assistant__room_context',
+        arguments: JSON.stringify({ room: null, kind: 'temperature', action: 'read' }),
+      },
+    },
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(commands, ['switch.office_lamp', 'sensor.office_temp']);
+});
+
+test('la description de pièce rejoint aussi une conversation anonyme sans outils HA', (t) => {
+  const f = fixture(t);
+  const store = new SatelliteStore(f.db, Date.now);
+  const sat = store.create('Bureau').satellite;
+  store.update(sat.id, {
+    room: {
+      areaId: null,
+      description: 'Pièce de travail à l’étage',
+      temperatureEntityId: null,
+      humidityEntityId: null,
+      coverEntityId: null,
+    },
+  });
+  const home = { tools: () => [] } as unknown as HomeAssistant;
+  f.live.attachRoomLighting(new SatelliteLightingBridge(store, home, f.controller));
+  f.controller.satelliteWake({ id: sat.id, name: sat.name, profileId: null });
+  const session = f.sessions[0]!;
+  assert.match(session.instructions!, /Pièce de travail à l’étage/);
+  if (session.delegation?.type === 'responses')
+    assert.match(session.delegation.responses.instructions!, /Pièce de travail à l’étage/);
 });

@@ -15,6 +15,15 @@ export interface SatelliteSettings {
   attentive: boolean;
 }
 
+/** Contexte stable ; les mesures sont toujours relues à la demande. */
+export interface SatelliteRoom {
+  areaId: string | null;
+  description: string;
+  temperatureEntityId: string | null;
+  humidityEntityId: string | null;
+  coverEntityId: string | null;
+}
+
 export interface SatelliteLighting {
   areaId: string | null;
   defaultEntityIds: string[];
@@ -28,6 +37,7 @@ export interface SatelliteView extends SatelliteSettings {
   /** Profil rattaché (mémoire personnelle) ; null : satellite anonyme, le cas par défaut. */
   profileId: string | null;
   lighting?: SatelliteLighting;
+  room?: SatelliteRoom;
   createdAt: number;
   lastSeenAt: number | null;
   online: boolean;

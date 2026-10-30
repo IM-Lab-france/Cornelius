@@ -460,6 +460,7 @@ export const api = {
       profileId?: string | null;
       volume?: number;
       lighting?: import('../shared/satellites').SatelliteLighting;
+      room?: import('../shared/satellites').SatelliteRoom;
     },
   ) =>
     request<{ satellite: SatelliteView }>('/api/admin/satellites/' + encodeURIComponent(id), {
