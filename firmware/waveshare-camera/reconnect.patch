@@ -1,0 +1,13 @@
+diff --git a/main/link.c b/main/link.c
+--- a/main/link.c
++++ b/main/link.c
+@@ -355,6 +355,9 @@
+         /* La clé épinglée identifie Cornelius ; le nom ou l'adresse du certificat n'ajoute rien
+          * (il change avec les adresses de l'ordinateur). */
+         .skip_cert_common_name_check = true,
++        /* Une fermeture propre du serveur pendant sa maintenance doit aussi
++         * relancer la liaison, sans attendre un changement d'adresse mDNS. */
++        .enable_close_reconnect = true,
+         .reconnect_timeout_ms = 3000,
+         .network_timeout_ms = 10000,
+         .buffer_size = 8192,

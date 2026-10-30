@@ -6,7 +6,7 @@ Ce dossier conserve le correctif complet de cette installation : audio réglé, 
 
 Reconstruction dans un clone séparé de la base :
 
-1. Appliquer `extension.patch` avec `git apply`.
+1. Appliquer `extension.patch`, puis `reconnect.patch`, avec `git apply`.
 2. Copier `main/camera.c`, `main/camera.h`, `main/ota.c`, `main/ota.h`, `platformio.ini` et `partitions.csv` dans ce clone. Préparer la clé propre à cette carte avec `provision-ota-key.py`, comme indiqué dans `OTA.md`.
 3. Vérifier l’adresse du serveur dans `sdkconfig.defaults` et adapter `upload_port` au port série réel de la Waveshare. Ne jamais remplacer le port d’un autre équipement.
 4. Utiliser PlatformIO et lancer `pio run --disable-auto-clean`. Sur un ancien build, vérifier aussi `CONFIG_CAMERA_PSRAM_DMA=y` dans le sdkconfig actif. L’audio et la caméra partagent l’I2C mais la caméra ne possède pas ce bus ; elle ne le supprime pas.
@@ -32,3 +32,9 @@ Le verrou d'envoi des messages WebSocket de contrôle attend désormais 12 secon
 L'état OTA fournit aussi des compteurs numériques de pertes Wi-Fi, de reconnexions WebSocket et d'envois lents, le RSSI et le temps depuis le démarrage. Ces diagnostics ne contiennent aucun enregistrement audio. Les réglages et clés des deux cartes restent séparés ; les paquets de cette version sont conservés dans les dossiers locaux `ota2-artifacts` de chaque carte.
 
 Le seul ajustement du délai en ota2 n'a pas suffi en écoute active : les allocations TLS, l'annulation d'écho et les services locaux laissaient très peu de mémoire interne libre. La version ota3 utilise `CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y` pour réserver les allocations TLS en PSRAM et préserver la DRAM du Wi-Fi/audio. La signature serveur et le chiffrement de la liaison restent actifs. Les compteurs de déconnexion et le traitement des codes d'erreur sont également corrigés ; l'ancien compteur ota2 ne doit pas servir à conclure à l'absence de coupures. Les paquets actuels sont dans les dossiers privés `ota3-artifacts`.
+
+## Reconnexion après maintenance du serveur (vm2)
+
+`reconnect.patch` active `enable_close_reconnect` dans le client WebSocket. La reconnexion automatique après une erreur réseau ne couvre pas, à elle seule, une fermeture propre envoyée par le serveur : sans cette option, le client s’arrête après le handshake CLOSE. Le délai de nouvelle tentative reste de trois secondes. Les contrôles TLS, l’authentification et la configuration des deux cartes restent inchangés.
+
+Les images vm2 doivent être compilées et emballées séparément pour Bureau et Salon, avec leur clé DPAPI existante et leur nom respectif. La vérification en service doit contrôler la reconnexion et le retour du micro prêt après fermeture propre puis remise en disponibilité du backend, sans redémarrer le satellite ni modifier son temps de fonctionnement.
